@@ -273,6 +273,100 @@ _ANALYSIS_INSTRUCTIONS = {
         "SDKs. Label connections with protocols and libraries used. "
         "Output ONLY the PlantUML code between @startuml and @enduml."
     ),
+    # ── Security & Code Quality Scans ──────────────────────────
+    "sec_hardcoded_secrets": (
+        "You are a senior Android security auditor. Analyze the code context "
+        "for hardcoded API keys, tokens, passwords, secret strings, and "
+        "credentials. Check for strings that look like Base64-encoded secrets, "
+        "OAuth tokens, Firebase keys, or AWS/GCP credentials embedded directly "
+        "in Java/Kotlin source files instead of BuildConfig or local.properties. "
+        "Return findings as a JSON array with keys: severity, title, location, "
+        "description, recommendation. Output ONLY the JSON array."
+    ),
+    "sec_insecure_network": (
+        "You are a senior Android security auditor. Analyze the code for "
+        "insecure network communication: plain HTTP URLs (not HTTPS), disabled "
+        "SSL certificate validation, missing certificate pinning, trusting all "
+        "certificates via custom TrustManagers, cleartext traffic enabled in "
+        "AndroidManifest, and insecure WebSocket connections. "
+        "Return findings as a JSON array with keys: severity, title, location, "
+        "description, recommendation. Output ONLY the JSON array."
+    ),
+    "sec_sql_injection": (
+        "You are a senior Android security auditor. Analyze the code for SQL "
+        "injection vulnerabilities: raw SQL queries using string concatenation, "
+        "missing parameterized queries in Room/SQLite, unprotected or exported "
+        "ContentProviders without proper permission checks, and dynamic query "
+        "construction from user input. "
+        "Return findings as a JSON array with keys: severity, title, location, "
+        "description, recommendation. Output ONLY the JSON array."
+    ),
+    "sec_data_exposure": (
+        "You are a senior Android security auditor. Analyze the code for "
+        "sensitive data exposure: logging of passwords/tokens/PII via Log.d, "
+        "storing sensitive data in unencrypted SharedPreferences, writing "
+        "private data to external storage without encryption, exposing data "
+        "through Intents without proper flags, and clipboard data leaks. "
+        "Return findings as a JSON array with keys: severity, title, location, "
+        "description, recommendation. Output ONLY the JSON array."
+    ),
+    "sec_permission_misuse": (
+        "You are a senior Android security auditor. Analyze manifest and code "
+        "for permission issues: dangerous permissions requested but never used, "
+        "missing runtime permission checks for camera/location/storage, "
+        "exported Activities/Services/Receivers without permission protection, "
+        "and use of signature-level permissions incorrectly. "
+        "Return findings as a JSON array with keys: severity, title, location, "
+        "description, recommendation. Output ONLY the JSON array."
+    ),
+    "sec_memory_leaks": (
+        "You are a senior Android code quality auditor. Analyze for memory leaks: "
+        "static references to Activity/Context, inner classes holding Activity "
+        "references, Handler/Runnable leaks, unclosed Cursor/InputStream/DB "
+        "connections, views not nullified in onDestroyView, and AsyncTask or "
+        "thread references surviving configuration changes. "
+        "Return findings as a JSON array with keys: severity, title, location, "
+        "description, recommendation. Output ONLY the JSON array."
+    ),
+    "sec_solid_violations": (
+        "You are a senior software architect. Analyze the code for SOLID "
+        "principle violations: God classes with too many responsibilities "
+        "(Single Responsibility), concrete class dependencies instead of "
+        "interfaces (Dependency Inversion), classes that must change for "
+        "unrelated reasons (Open-Closed), large interfaces forcing unused "
+        "implementations (Interface Segregation), and subclasses that break "
+        "parent class contracts (Liskov Substitution). "
+        "Return findings as a JSON array with keys: severity, title, location, "
+        "description, recommendation. Output ONLY the JSON array."
+    ),
+    "sec_android_antipatterns": (
+        "You are a senior Android developer. Analyze the code for common "
+        "Android anti-patterns: network/disk operations on the main thread, "
+        "missing null safety checks, deprecated API usage, hardcoded strings "
+        "and dimensions in layouts instead of resources, Context misuse "
+        "(Application vs Activity), and Fragment instantiation with constructor "
+        "arguments instead of newInstance pattern. "
+        "Return findings as a JSON array with keys: severity, title, location, "
+        "description, recommendation. Output ONLY the JSON array."
+    ),
+    "sec_error_handling": (
+        "You are a senior Android developer. Analyze error handling quality: "
+        "empty catch blocks that swallow exceptions, catching generic Exception "
+        "instead of specific types, missing try-catch around IO/network/DB "
+        "operations, missing null checks before method calls, and missing "
+        "error states in UI (no error handling in Retrofit callbacks). "
+        "Return findings as a JSON array with keys: severity, title, location, "
+        "description, recommendation. Output ONLY the JSON array."
+    ),
+    "sec_performance": (
+        "You are a senior Android performance engineer. Analyze for performance "
+        "issues: unnecessary object allocation in loops or onDraw, missing view "
+        "holder pattern in RecyclerView, nested layouts causing overdraw, "
+        "synchronous operations blocking the UI thread, large bitmap loading "
+        "without downsampling, and repeated database queries without caching. "
+        "Return findings as a JSON array with keys: severity, title, location, "
+        "description, recommendation. Output ONLY the JSON array."
+    ),
 }
 
 

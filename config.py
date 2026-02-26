@@ -29,6 +29,17 @@ MODEL_ROUTING = {
     "doc_data_flow": "qwen2.5-coder",
     "doc_api": "qwen2.5-coder",
     "complexity": "deepseek-coder",         # DeepSeek excels at pure code logic analysis
+    # Security & Code Quality scans — DeepSeek excels at code-level analysis
+    "sec_hardcoded_secrets": "deepseek-coder",
+    "sec_insecure_network": "deepseek-coder",
+    "sec_sql_injection": "deepseek-coder",
+    "sec_data_exposure": "deepseek-coder",
+    "sec_permission_misuse": "deepseek-coder",
+    "sec_memory_leaks": "deepseek-coder",
+    "sec_solid_violations": "deepseek-coder",
+    "sec_android_antipatterns": "deepseek-coder",
+    "sec_error_handling": "deepseek-coder",
+    "sec_performance": "deepseek-coder",
 }
 
 EMBEDDING_MODEL = "nomic-embed-text"    # For vector embeddings

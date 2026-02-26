@@ -35,9 +35,14 @@ def _render_via_kroki(plantuml_code: str) -> Optional[bytes]:
             data=payload,
             timeout=30,
         )
-        if r.status_code == 200 and len(r.content) > 100:
+        content_type = r.headers.get("content-type", "")
+        if r.status_code == 200 and "image" in content_type and len(r.content) > 200:
             return r.content
-        print(f"[PlantUML Renderer] Kroki returned HTTP {r.status_code}")
+        if r.status_code != 200:
+            body_preview = r.text[:200] if r.text else "(empty)"
+            print(f"[PlantUML Renderer] Kroki HTTP {r.status_code}: {body_preview}")
+        else:
+            print(f"[PlantUML Renderer] Kroki bad response: type={content_type}, len={len(r.content)}")
         return None
     except Exception as e:
         print(f"[PlantUML Renderer] Kroki error: {e}")
@@ -93,9 +98,13 @@ def _render_via_plantuml_server(plantuml_code: str) -> Optional[bytes]:
         encoded = _encode_plantuml(plantuml_code)
         url = f"{PLANTUML_SERVER}/png/{encoded}"
         r = requests.get(url, timeout=30)
-        if r.status_code == 200 and len(r.content) > 100:
+        content_type = r.headers.get("content-type", "")
+        if r.status_code == 200 and "image" in content_type and len(r.content) > 200:
             return r.content
-        print(f"[PlantUML Renderer] PlantUML server returned HTTP {r.status_code}")
+        print(
+            f"[PlantUML Renderer] PlantUML server: HTTP {r.status_code}, "
+            f"type={content_type}, len={len(r.content)}"
+        )
         return None
     except Exception as e:
         print(f"[PlantUML Renderer] PlantUML server error: {e}")
