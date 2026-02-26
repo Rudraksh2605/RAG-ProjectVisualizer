@@ -183,6 +183,8 @@ _ANALYSIS_INSTRUCTIONS = {
         "Generate a valid PlantUML class diagram from the code context. "
         "Include class names, key fields, method signatures, and relationships "
         "(inheritance, composition, dependency). Use proper PlantUML syntax. "
+        "IMPORTANT: For inheritance use 'class Child extends Parent', "
+        "NOT 'class Child : Parent' (colon syntax is invalid PlantUML). "
         "Output ONLY the PlantUML code between @startuml and @enduml."
     ),
     "sequence_diagram": (
@@ -257,6 +259,9 @@ _ANALYSIS_INSTRUCTIONS = {
         "(User, Admin, External System) and all use cases based on the UI "
         "Activities, Fragments, ViewModels, and API methods in the context. "
         "Show include/extend relationships between use cases. "
+        "IMPORTANT: Always use parentheses for use case names in relationships, "
+        "e.g. 'User --> (Login)' NOT 'User --> Login'. "
+        "For use case definitions use: usecase \"Name\" as UC1. "
         "Output ONLY the PlantUML code between @startuml and @enduml."
     ),
     "package_diagram": (

@@ -329,6 +329,26 @@ def _repair_plantuml(code: str) -> str:
         flags=re.MULTILINE,
     )
 
+    # ── Fix bare multi-word use case names in arrows ──
+    # LLMs write: "User --> Sign Up" instead of "User --> (Sign Up)"
+    # This regex finds arrow lines where the target is 2+ bare words
+    # (not already wrapped in parens or quotes) and wraps them in parens.
+    # Pattern: anything --> <multi-word target>
+    # But NOT: anything --> (already in parens) or anything --> "already quoted"
+    body = re.sub(
+        r'(-+->|\.\.+>|<-+-|<\.\.+)\s+(?!["(])([A-Z][a-zA-Z]*(?:\s+[A-Za-z/]+)+)\s*$',
+        lambda m: f'{m.group(1)} ({m.group(2)})',
+        body,
+        flags=re.MULTILINE,
+    )
+    # Also fix the left side of arrows: "Sign Up --> (something)"
+    body = re.sub(
+        r'^\s*(?!["(])([A-Z][a-zA-Z]*(?:\s+[A-Za-z/]+)+)\s+(-+->|\.\.+>)',
+        lambda m: f'({m.group(1)}) {m.group(2)}',
+        body,
+        flags=re.MULTILINE,
+    )
+
     # Fix unbalanced braces — add missing closing braces at the end
     open_b = body.count("{")
     close_b = body.count("}")
