@@ -24,7 +24,10 @@ st.set_page_config(
 from core.ollama_client import check_ollama_status
 from core import rag_engine
 from generators import plantuml_gen, graphviz_gen, doc_generator, analysis
+from generators.plantuml_gen import DIAGRAM_REGISTRY
 from utils.plantuml_renderer import render_to_bytesio, get_diagram_url
+from utils.parallel import run_parallel
+import config
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -55,6 +58,15 @@ st.markdown("""
     .badge-err  { color:#f87171; font-weight:600; }
     /* Section divider */
     .section-divider { border-top: 1px solid #334155; margin: 1.5rem 0; }
+    /* Diagram result card */
+    .diagram-card {
+        background: #1a1a2e;
+        border: 1px solid #3a3a5c;
+        border-radius: 10px;
+        padding: 16px;
+        margin-bottom: 12px;
+    }
+    .diagram-card h4 { color: #a78bfa; margin-bottom: 8px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -149,9 +161,10 @@ if not rag_engine.get_project_path():
         "This tool uses **RAG** (Retrieval-Augmented Generation) with "
         "**DeepSeek Coder 6.7B** to analyze your codebase and generate:\n"
         "- 📊 Dependency graphs\n"
-        "- 📐 UML class/sequence/activity diagrams\n"
+        "- 📐 UML class/sequence/activity/state/component/use-case/package/deployment diagrams\n"
         "- 📖 AI-powered documentation\n"
-        "- 💬 Interactive project Q&A"
+        "- 💬 Interactive project Q&A\n"
+        "- ⚡ Parallel batch generation with threading"
     )
     st.stop()
 
@@ -159,11 +172,10 @@ if not rag_engine.get_project_path():
 stats = rag_engine.get_project_stats()
 overview = analysis.get_overview(stats)
 
-tab_overview, tab_class, tab_deps, tab_activity, tab_docs, tab_chat = st.tabs([
+tab_overview, tab_uml, tab_deps, tab_docs, tab_chat = st.tabs([
     "📊 Overview",
-    "📐 Class Diagram",
+    "📐 UML Diagrams",
     "🔗 Dependency Graph",
-    "🗺️ Activity Diagram",
     "📖 Documentation",
     "💬 Chat",
 ])
@@ -237,49 +249,142 @@ with tab_overview:
                 st.code(dep, language=None)
 
 
-# ── Tab 2: Class Diagram ────────────────────────────────────
-with tab_class:
-    st.markdown("## PlantUML Class Diagram")
+# ── Tab 2: UML Diagrams (unified) ──────────────────────────
+with tab_uml:
+    st.markdown("## 📐 UML Diagrams")
+    st.caption(
+        "Generate 8 types of UML diagrams using RAG + LLM. "
+        "Select a single diagram or use **Batch Generate** to create "
+        "multiple diagrams in parallel with threading."
+    )
 
+    diagram_names = list(DIAGRAM_REGISTRY.keys())
     class_names = analysis.get_class_list(stats)
-    focus = st.selectbox(
-        "Focus on class (optional — leave blank for full project):",
-        ["(All Classes)"] + class_names,
-        key="class_focus",
-    )
-    diagram_type = st.radio(
-        "Diagram type:", ["Class Diagram", "Sequence Diagram"],
-        horizontal=True, key="uml_type",
-    )
 
-    if st.button("🎨 Generate Diagram", key="gen_uml"):
-        with st.spinner("Generating via RAG + DeepSeek Coder…"):
-            fc = None if focus == "(All Classes)" else focus
-            if diagram_type == "Class Diagram":
-                puml = plantuml_gen.generate_class_diagram(fc)
+    # ── Single diagram generation ──
+    st.markdown("### 🎯 Single Diagram")
+    col_sel, col_focus = st.columns([1, 1])
+    with col_sel:
+        selected_diagram = st.selectbox(
+            "Diagram Type:",
+            diagram_names,
+            key="uml_type_select",
+        )
+    with col_focus:
+        gen_func, needs_focus = DIAGRAM_REGISTRY[selected_diagram]
+        if needs_focus:
+            focus_sel = st.selectbox(
+                "Focus on class (optional):",
+                ["(All Classes)"] + class_names,
+                key="uml_focus_class",
+            )
+        else:
+            focus_sel = None
+            st.info(f"ℹ️ {selected_diagram} does not use a focus class.")
+
+    if st.button("🎨 Generate Diagram", key="gen_single_uml"):
+        with st.spinner(f"Generating {selected_diagram} via RAG + LLM…"):
+            if needs_focus and focus_sel and focus_sel != "(All Classes)":
+                puml = gen_func(focus_sel)
+            elif needs_focus:
+                puml = gen_func(None)
             else:
-                puml = plantuml_gen.generate_sequence_diagram(fc)
+                puml = gen_func()
 
         # ── Render the diagram as an image ──
-        st.markdown("### 📊 Rendered Diagram")
+        st.markdown(f"### 📊 {selected_diagram}")
         with st.spinner("Rendering diagram image…"):
             img = render_to_bytesio(puml)
         if img:
-            st.image(img, caption=f"{diagram_type}", use_container_width=True)
-            # Download rendered PNG
+            st.image(img, caption=selected_diagram, use_container_width=True)
             img.seek(0)
             st.download_button(
                 "🖼️ Download PNG", img.read(),
-                file_name="diagram.png", mime="image/png", key="dl_uml_png",
+                file_name=f"{selected_diagram.lower().replace(' ', '_')}.png",
+                mime="image/png", key="dl_single_png",
             )
         else:
             st.warning("Could not render image. Check the PlantUML syntax below.")
 
-        # ── Show raw PlantUML code in expander ──
         with st.expander("📝 View PlantUML Source Code", expanded=False):
             st.code(puml, language="plantuml")
-        st.download_button("💾 Download .puml", puml,
-                           file_name="diagram.puml", mime="text/plain", key="dl_uml_puml")
+        st.download_button(
+            "💾 Download .puml", puml,
+            file_name=f"{selected_diagram.lower().replace(' ', '_')}.puml",
+            mime="text/plain", key="dl_single_puml",
+        )
+
+    # ── Batch diagram generation (parallel) ──
+    st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+    st.markdown("### ⚡ Batch Generate (Parallel)")
+    st.caption(
+        f"Generate multiple diagrams concurrently using "
+        f"**{config.PARALLEL_MAX_WORKERS} worker threads**."
+    )
+
+    batch_selected = st.multiselect(
+        "Select diagrams to generate:",
+        diagram_names,
+        default=["Class Diagram", "Component Diagram", "Use Case Diagram"],
+        key="batch_select",
+    )
+
+    if st.button("🚀 Batch Generate", key="gen_batch_uml",
+                 disabled=len(batch_selected) == 0):
+        progress = st.progress(0, text="Starting batch generation…")
+
+        step_count = [0]
+        total_steps = len(batch_selected)
+
+        def _batch_progress(msg):
+            step_count[0] += 1
+            progress.progress(
+                min(step_count[0] / total_steps, 1.0),
+                text=msg,
+            )
+
+        # Build tasks — for batch, we skip focus class (use project-wide)
+        tasks = []
+        for name in batch_selected:
+            gen_func, needs_focus = DIAGRAM_REGISTRY[name]
+            if needs_focus:
+                tasks.append((name, lambda f=gen_func: f(None)))
+            else:
+                tasks.append((name, gen_func))
+
+        with st.spinner(f"Generating {len(tasks)} diagrams in parallel…"):
+            results = run_parallel(
+                tasks,
+                max_workers=config.PARALLEL_MAX_WORKERS,
+                progress_callback=_batch_progress,
+            )
+
+        progress.progress(1.0, text="✅ All diagrams generated!")
+
+        # Display each result
+        for name in batch_selected:
+            puml = results.get(name, "")
+            if not puml:
+                continue
+            st.markdown(f'<div class="diagram-card"><h4>📐 {name}</h4></div>',
+                        unsafe_allow_html=True)
+
+            with st.spinner(f"Rendering {name}…"):
+                img = render_to_bytesio(puml)
+            if img:
+                st.image(img, caption=name, use_container_width=True)
+                img.seek(0)
+                safe_name = name.lower().replace(" ", "_")
+                st.download_button(
+                    f"🖼️ Download {name} PNG", img.read(),
+                    file_name=f"{safe_name}.png",
+                    mime="image/png", key=f"dl_batch_{safe_name}_png",
+                )
+            else:
+                st.warning(f"Could not render {name}. Showing raw PlantUML.")
+
+            with st.expander(f"📝 {name} — PlantUML Source", expanded=False):
+                st.code(puml, language="plantuml")
 
 
 # ── Tab 3: Dependency Graph ─────────────────────────────────
@@ -318,42 +423,12 @@ with tab_deps:
                            file_name="dependency.dot", mime="text/plain")
 
 
-# ── Tab 4: Activity Diagram ─────────────────────────────────
-with tab_activity:
-    st.markdown("## Activity / Navigation Flow Diagram")
-    st.caption("Uses RAG to retrieve all UI components and generate a navigation flow.")
-
-    if st.button("🗺️ Generate Activity Diagram", key="gen_activity"):
-        with st.spinner("Generating navigation flow diagram…"):
-            puml = plantuml_gen.generate_activity_diagram()
-
-        # ── Render the diagram as an image ──
-        st.markdown("### 📊 Rendered Activity Diagram")
-        with st.spinner("Rendering diagram image…"):
-            img = render_to_bytesio(puml)
-        if img:
-            st.image(img, caption="Activity / Navigation Flow", use_container_width=True)
-            img.seek(0)
-            st.download_button(
-                "🖼️ Download PNG", img.read(),
-                file_name="activity_diagram.png", mime="image/png", key="dl_act_png",
-            )
-        else:
-            st.warning("Could not render image. Check the PlantUML syntax below.")
-
-        # ── Show raw PlantUML code in expander ──
-        with st.expander("📝 View PlantUML Source Code", expanded=False):
-            st.code(puml, language="plantuml")
-        st.download_button("💾 Download .puml", puml,
-                           file_name="activity_diagram.puml", mime="text/plain", key="dl_act_puml")
-
-
-# ── Tab 5: Documentation ────────────────────────────────────
+# ── Tab 4: Documentation ────────────────────────────────────
 with tab_docs:
     st.markdown("## AI-Generated Documentation")
 
     doc_mode = st.radio(
-        "Mode:", ["Single Section", "Full Report"],
+        "Mode:", ["Single Section", "Full Report (Parallel ⚡)"],
         horizontal=True, key="doc_mode",
     )
 
@@ -368,8 +443,12 @@ with tab_docs:
                 )
             st.markdown(content)
     else:
+        st.caption(
+            f"All {len(doc_generator.SECTIONS)} sections will be generated "
+            f"concurrently using **{config.PARALLEL_MAX_WORKERS} threads**."
+        )
         if st.button("📖 Generate Full Report", key="gen_full_report"):
-            progress = st.progress(0, text="Starting…")
+            progress = st.progress(0, text="Starting parallel generation…")
 
             step_count = [0]
 
@@ -380,11 +459,11 @@ with tab_docs:
                     text=msg,
                 )
 
-            with st.spinner("Generating full report…"):
+            with st.spinner("Generating full report in parallel…"):
                 report = doc_generator.generate_full_report(
                     progress_callback=_doc_progress
                 )
-            progress.progress(1.0, text="Done!")
+            progress.progress(1.0, text="✅ Done!")
             st.markdown(report)
             st.download_button(
                 "💾 Download Report (.md)", report,
@@ -392,7 +471,7 @@ with tab_docs:
             )
 
 
-# ── Tab 6: Chat ─────────────────────────────────────────────
+# ── Tab 5: Chat ─────────────────────────────────────────────
 with tab_chat:
     st.markdown("## 💬 Ask About Your Project")
     st.caption(

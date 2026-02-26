@@ -16,6 +16,11 @@ MODEL_ROUTING = {
     "sequence_diagram": "qwen2.5-coder",
     "activity_diagram": "qwen2.5-coder",
     "dependency_graph": "qwen2.5-coder",    # Graphviz text
+    "state_diagram": "qwen2.5-coder",       # New UML diagrams
+    "component_diagram": "qwen2.5-coder",
+    "usecase_diagram": "qwen2.5-coder",
+    "package_diagram": "qwen2.5-coder",
+    "deployment_diagram": "qwen2.5-coder",
     "doc_overview": "qwen2.5-coder",        # Documentation
     "doc_architecture": "qwen2.5-coder",
     "doc_features": "qwen2.5-coder",
@@ -27,6 +32,9 @@ MODEL_ROUTING = {
 }
 
 EMBEDDING_MODEL = "nomic-embed-text"    # For vector embeddings
+
+# ── Parallel execution ─────────────────────────────────────────
+PARALLEL_MAX_WORKERS = 3                # Max concurrent LLM requests
 
 # ── Generation parameters ──────────────────────────────────────
 LLM_TEMPERATURE = 0.3

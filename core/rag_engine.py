@@ -238,6 +238,41 @@ _ANALYSIS_INSTRUCTIONS = {
         "Analyze the complexity of the code. Identify the most complex methods, "
         "estimate time/space complexity, and suggest optimizations."
     ),
+    "state_diagram": (
+        "Generate a valid PlantUML state diagram showing the lifecycle states "
+        "and state transitions of the Android component or class in the context. "
+        "Include lifecycle callbacks (onCreate, onResume, onPause, onDestroy), "
+        "guard conditions, and entry/exit actions. "
+        "Output ONLY the PlantUML code between @startuml and @enduml."
+    ),
+    "component_diagram": (
+        "Generate a valid PlantUML component diagram showing the Android "
+        "Manifest components (Activities, Services, BroadcastReceivers, "
+        "ContentProviders) and their interactions via Intents, bound services, "
+        "and content URIs. Group by functional area. "
+        "Output ONLY the PlantUML code between @startuml and @enduml."
+    ),
+    "usecase_diagram": (
+        "Generate a valid PlantUML use case diagram identifying the actors "
+        "(User, Admin, External System) and all use cases based on the UI "
+        "Activities, Fragments, ViewModels, and API methods in the context. "
+        "Show include/extend relationships between use cases. "
+        "Output ONLY the PlantUML code between @startuml and @enduml."
+    ),
+    "package_diagram": (
+        "Generate a valid PlantUML package diagram showing the package "
+        "structure grouped by architectural layers (Presentation, Domain, Data). "
+        "Draw dependency arrows between packages. Highlight any dependency "
+        "rule violations. "
+        "Output ONLY the PlantUML code between @startuml and @enduml."
+    ),
+    "deployment_diagram": (
+        "Generate a valid PlantUML deployment diagram showing the mobile "
+        "device node with the app, and external nodes: REST API servers, "
+        "databases (Room/SQLite), cloud services (Firebase), and third-party "
+        "SDKs. Label connections with protocols and libraries used. "
+        "Output ONLY the PlantUML code between @startuml and @enduml."
+    ),
 }
 
 
