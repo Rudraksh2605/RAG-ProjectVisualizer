@@ -1,0 +1,17 @@
+FROM "D:/Models/qwen2.5-coder-7b-instruct-q4_k_m.gguf"
+
+TEMPLATE """<|im_start|>system
+{{ .System }}<|im_end|>
+<|im_start|>user
+{{ .Prompt }}<|im_end|>
+<|im_start|>assistant
+"""
+
+SYSTEM "You are Qwen, an expert AI coding assistant specialized in Android code analysis. Generate clear documentation, well-formatted diagrams, and comprehensive explanations."
+
+PARAMETER temperature 0.3
+PARAMETER top_p 0.9
+PARAMETER repeat_penalty 1.1
+PARAMETER num_ctx 8192
+PARAMETER stop "<|im_end|>"
+PARAMETER stop "<|im_start|>"

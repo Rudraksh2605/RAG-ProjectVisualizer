@@ -1,0 +1,11 @@
+FROM "D:/Models/deepseek-coder-6.7b-instruct.Q4_K_M.gguf"
+
+TEMPLATE """{{- if .System }}{{ .System }}{{ end }}
+{{ .Prompt }}"""
+
+SYSTEM "You are an expert code analyst. You specialize in deep code logic analysis, complexity estimation, and finding optimization opportunities."
+
+PARAMETER temperature 0.3
+PARAMETER top_p 0.9
+PARAMETER repeat_penalty 1.1
+PARAMETER num_ctx 8192
