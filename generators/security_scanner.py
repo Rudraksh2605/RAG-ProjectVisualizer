@@ -155,9 +155,14 @@ SEVERITY_ICONS = {
 #  Single Category Scan
 # ═══════════════════════════════════════════════════════════════
 
-def scan_category(category_key: str) -> Dict:
+def scan_category(category_key: str,
+                  _prebuilt_context: str = None) -> Dict:
     """
     Run a security/code-quality scan for a single category.
+
+    If *_prebuilt_context* is supplied (by scan_all), it skips the
+    RAG retrieval step and uses the pre-fetched context directly,
+    avoiding redundant embedding+search calls across categories.
 
     Returns a dict with:
       - category: category key
@@ -190,12 +195,23 @@ def scan_category(category_key: str) -> Dict:
     )
 
     try:
-        raw = rag_engine.query(
-            question,
-            analysis_type=analysis_type,
-            top_k=top_k,
-            layer_filter=layer_filter,
-        )
+        if _prebuilt_context is not None:
+            # Fast path: skip retrieval, go straight to LLM generation
+            from core.rag_engine import _build_prompt
+            from core.ollama_client import generate
+            prompt = _build_prompt(question, _prebuilt_context, analysis_type)
+            target_model = getattr(config, "MODEL_ROUTING", {}).get(
+                analysis_type, config.LLM_MODEL
+            )
+            raw = generate(prompt, model=target_model)
+        else:
+            # Normal path: full RAG query (embed → retrieve → generate)
+            raw = rag_engine.query(
+                question,
+                analysis_type=analysis_type,
+                top_k=top_k,
+                layer_filter=layer_filter,
+            )
         findings = _parse_findings(raw)
         # Sort by severity
         findings.sort(key=lambda f: SEVERITY_ORDER.get(f.get("severity", "INFO"), 4))
@@ -230,6 +246,10 @@ def scan_all(
     """
     Run multiple scan categories in parallel.
 
+    Performance: pre-retrieves shared code context once and reuses
+    it across categories that share the same layer_filter, avoiding
+    redundant embedding + vector search calls.
+
     Parameters
     ----------
     category_keys : list of str, optional
@@ -244,10 +264,36 @@ def scan_all(
     if category_keys is None:
         category_keys = [c[0] for c in SCAN_CATEGORIES]
 
-    tasks = [
-        (key, lambda k=key: scan_category(k))
-        for key in category_keys
-    ]
+    # ── Pre-retrieve shared context per unique (layer_filter, top_k) ──
+    from core import embeddings, vector_store
+    from core.rag_engine import _format_retrieved_context
+
+    context_cache = {}  # (layer_filter, top_k) -> formatted context string
+    for key in category_keys:
+        cat = _get_category(key)
+        if not cat:
+            continue
+        _, _, _, _, _, top_k, layer_filter = cat
+        cache_key = (layer_filter, top_k)
+        if cache_key not in context_cache:
+            try:
+                q_emb = embeddings.embed_text("security code quality audit")
+                where = {"layer": layer_filter} if layer_filter else None
+                results = vector_store.search(q_emb, top_k=top_k, where=where)
+                context_cache[cache_key] = _format_retrieved_context(results)
+            except Exception:
+                context_cache[cache_key] = None  # fallback to full query
+
+    # ── Build tasks with pre-fetched context ──
+    def _make_scan_task(k):
+        cat = _get_category(k)
+        if not cat:
+            return lambda: scan_category(k)
+        _, _, _, _, _, top_k, layer_filter = cat
+        ctx = context_cache.get((layer_filter, top_k))
+        return lambda: scan_category(k, _prebuilt_context=ctx)
+
+    tasks = [(key, _make_scan_task(key)) for key in category_keys]
 
     results = run_parallel(
         tasks,

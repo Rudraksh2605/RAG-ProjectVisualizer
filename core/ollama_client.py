@@ -1,12 +1,27 @@
 """
 HTTP client for the Ollama API — handles both text generation
 (DeepSeek Coder) and health checks.
+
+Performance: uses a shared requests.Session for HTTP connection pooling.
 """
 
+import json
 import requests
 import re
 from typing import Optional, Generator
 import config
+
+
+# ── HTTP session for connection pooling ────────────────────────
+_session: Optional[requests.Session] = None
+
+
+def _get_session() -> requests.Session:
+    """Return a shared HTTP session for connection pooling."""
+    global _session
+    if _session is None:
+        _session = requests.Session()
+    return _session
 
 
 # Tokens that models may leak into their output
@@ -26,7 +41,8 @@ def check_ollama_status() -> dict:
     Returns {"ok": bool, "models": [...], "error": str|None}.
     """
     try:
-        r = requests.get(f"{config.OLLAMA_BASE_URL}/api/tags", timeout=5)
+        s = _get_session()
+        r = s.get(f"{config.OLLAMA_BASE_URL}/api/tags", timeout=5)
         if r.status_code == 200:
             models = [m["name"] for m in r.json().get("models", [])]
             return {"ok": True, "models": models, "error": None}
@@ -59,7 +75,8 @@ def generate(prompt: str,
         },
     }
     try:
-        r = requests.post(
+        s = _get_session()
+        r = s.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",
             json=body,
             timeout=300,
@@ -92,7 +109,8 @@ def generate_stream(prompt: str,
         },
     }
     try:
-        r = requests.post(
+        s = _get_session()
+        r = s.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",
             json=body,
             stream=True,
@@ -101,7 +119,6 @@ def generate_stream(prompt: str,
         for line in r.iter_lines(decode_unicode=True):
             if not line:
                 continue
-            import json
             data = json.loads(line)
             token = data.get("response", "")
             if token:

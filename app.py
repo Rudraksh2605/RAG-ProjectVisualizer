@@ -21,6 +21,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+from concurrent.futures import ThreadPoolExecutor
 from core.ollama_client import check_ollama_status
 from core import rag_engine
 from generators import plantuml_gen, graphviz_gen, doc_generator, analysis
@@ -29,6 +30,13 @@ from generators.plantuml_gen import DIAGRAM_REGISTRY
 from utils.plantuml_renderer import render_to_bytesio, get_diagram_url
 from utils.parallel import run_parallel
 import config
+
+
+# ── Cached helpers (avoid re-running on every Streamlit re-render) ──
+
+@st.cache_data(ttl=30)
+def _cached_ollama_status():
+    return check_ollama_status()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -116,8 +124,8 @@ with st.sidebar:
     st.caption("Powered by DeepSeek Coder + Ollama")
     st.markdown("---")
 
-    # Ollama status check
-    status = check_ollama_status()
+    # Ollama status check (cached — avoids HTTP call on every re-render)
+    status = _cached_ollama_status()
     if status["ok"]:
         st.markdown('<span class="badge-ok">● Ollama Online</span>',
                     unsafe_allow_html=True)
@@ -406,6 +414,16 @@ with tab_uml:
 
         progress.progress(1.0, text="✅ All diagrams generated!")
 
+        # Pre-render all diagrams in parallel (faster than sequential HTTP)
+        def _render_one(name_puml):
+            name, puml = name_puml
+            return name, render_to_bytesio(puml)
+
+        render_pairs = [(n, results[n]) for n in batch_selected if results.get(n)]
+        with st.spinner(f"Rendering {len(render_pairs)} diagrams…"):
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                rendered = dict(pool.map(_render_one, render_pairs))
+
         # Display each result
         for name in batch_selected:
             puml = results.get(name, "")
@@ -414,8 +432,7 @@ with tab_uml:
             st.markdown(f'<div class="diagram-card"><h4>📐 {name}</h4></div>',
                         unsafe_allow_html=True)
 
-            with st.spinner(f"Rendering {name}…"):
-                img = render_to_bytesio(puml)
+            img = rendered.get(name)
             if img:
                 st.image(img, caption=name, use_container_width=True)
                 img.seek(0)

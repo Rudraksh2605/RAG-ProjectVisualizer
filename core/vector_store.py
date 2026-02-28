@@ -52,15 +52,19 @@ def reset_collection(name: str = None):
 
 
 def upsert_chunks(chunks: List[CodeChunk],
-                  embeddings: List[List[float]]):
-    """Insert or update chunks with their embeddings."""
+                  embeddings: List[List[float]],
+                  batch_size: int = 5000):
+    """Insert or update chunks with their embeddings (batched)."""
     coll = get_collection()
-    coll.upsert(
-        ids=[c.id for c in chunks],
-        embeddings=embeddings,
-        documents=[c.content for c in chunks],
-        metadatas=[c.metadata() for c in chunks],
-    )
+    for i in range(0, len(chunks), batch_size):
+        batch_c = chunks[i:i + batch_size]
+        batch_e = embeddings[i:i + batch_size]
+        coll.upsert(
+            ids=[c.id for c in batch_c],
+            embeddings=batch_e,
+            documents=[c.content for c in batch_c],
+            metadatas=[c.metadata() for c in batch_c],
+        )
 
 
 def search(query_embedding: List[float],

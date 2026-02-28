@@ -6,6 +6,8 @@ Workflow:
     2.  query(question, …)   → embed query → retrieve top-K → build prompt → generate
 """
 
+import hashlib
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Optional, Callable
 from core import parser, embeddings, vector_store
 from core.chunker import chunk_parsed_files, CodeChunk
@@ -18,6 +20,7 @@ import config
 _parsed_files: List[Dict] = []
 _chunks: List[CodeChunk] = []
 _project_path: Optional[str] = None
+_project_fingerprint: Optional[str] = None
 
 
 def get_parsed_files() -> List[Dict]:
@@ -32,17 +35,31 @@ def get_project_path() -> Optional[str]:
     return _project_path
 
 
+# ── Fingerprinting (skip re-indexing unchanged projects) ───────
+
+def _compute_fingerprint(file_list: List[Dict]) -> str:
+    """Hash of file paths + sizes to detect project changes."""
+    h = hashlib.md5()
+    for f in sorted(file_list, key=lambda x: x["path"]):
+        h.update(f"{f['path']}:{f['size']}".encode())
+    return h.hexdigest()
+
+
 # ── Indexing ───────────────────────────────────────────────────
 
 def index_project(project_path: str,
-                  progress: Optional[Callable] = None) -> Dict:
+                  progress: Optional[Callable] = None,
+                  force: bool = False) -> Dict:
     """
     Full indexing pipeline:
       scan files → parse → chunk → embed → store in ChromaDB.
 
+    Skips re-indexing if the project hasn't changed (same files and sizes)
+    unless *force* is True.
+
     Returns summary stats.
     """
-    global _parsed_files, _chunks, _project_path
+    global _parsed_files, _chunks, _project_path, _project_fingerprint
     _project_path = project_path
 
     # 1. Scan
@@ -50,14 +67,27 @@ def index_project(project_path: str,
         progress("Scanning project files…")
     file_list = scan_project_files(project_path)
 
-    # 2. Parse
+    # 1b. Check fingerprint — skip if unchanged
+    new_fp = _compute_fingerprint(file_list)
+    if not force and new_fp == _project_fingerprint and _chunks:
+        if progress:
+            progress("⚡ Project unchanged — using cached index.")
+        return {
+            "files": len(file_list),
+            "parsed": len(_parsed_files),
+            "chunks": len(_chunks),
+            "indexed": True,
+            "cached": True,
+        }
+
+    # 2. Parse (parallel — I/O-bound file reads + CPU regex)
     if progress:
         progress(f"Parsing {len(file_list)} files…")
-    _parsed_files = []
-    for fi in file_list:
-        pf = parser.parse_file(fi["path"])
-        if pf:
-            _parsed_files.append(pf)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda fi: parser.parse_file(fi["path"]),
+                                file_list))
+    _parsed_files = [pf for pf in results if pf]
 
     # 3. Chunk
     if progress:
@@ -85,6 +115,9 @@ def index_project(project_path: str,
         progress("Storing in vector database…")
     vector_store.reset_collection()
     vector_store.upsert_chunks(_chunks, emb_vectors)
+
+    # 6. Save fingerprint for future skip-check
+    _project_fingerprint = new_fp
 
     stats = {
         "files": len(file_list),
@@ -180,23 +213,79 @@ _SYSTEM_CONTEXT = (
 _ANALYSIS_INSTRUCTIONS = {
     "general": "Answer the question based on the code context provided.",
     "class_diagram": (
-        "Generate a valid PlantUML class diagram from the code context. "
-        "Include class names, key fields, method signatures, and relationships "
-        "(inheritance, composition, dependency). Use proper PlantUML syntax. "
-        "IMPORTANT: For inheritance use 'class Child extends Parent', "
-        "NOT 'class Child : Parent' (colon syntax is invalid PlantUML). "
-        "Output ONLY the PlantUML code between @startuml and @enduml."
+        "Generate a valid, DETAILED PlantUML class diagram from the code context.\n\n"
+        "STRUCTURAL REQUIREMENTS:\n"
+        "- Use visibility markers: + public, - private, # protected, ~ package-private\n"
+        "- Show method return types: + getUserName() : String\n"
+        "- Add <<stereotype>> annotations on classes: <<Activity>>, <<ViewModel>>, <<Repository>>, <<Entity>>, <<Singleton>>, <<Interface>>\n"
+        "- Group related classes inside 'package \"LayerName\" { }' blocks\n"
+        "- Show ALL relationships you can infer: inheritance (--|>), implementation (..|>), composition (*--), aggregation (o--), dependency (..>), association (-->)\n"
+        "- Label relationship arrows with role names and multiplicity where applicable, e.g.: User \"1\" *-- \"0..*\" Order : places\n"
+        "- Add 'note right of ClassName : ...' for important design patterns (Singleton, Observer, Factory etc.)\n"
+        "- For inheritance use 'class Child extends Parent', NOT 'class Child : Parent' (colon syntax is INVALID)\n\n"
+        "STYLING (include at the top after @startuml):\n"
+        "  skinparam classAttributeIconSize 0\n"
+        "  skinparam classFontStyle bold\n"
+        "  skinparam packageStyle rectangle\n"
+        "  skinparam class {\n"
+        "    BackgroundColor #1a1a2e\n"
+        "    BorderColor #7c3aed\n"
+        "    FontColor #e2e8f0\n"
+        "    ArrowColor #06b6d4\n"
+        "    StereotypeFontColor #a78bfa\n"
+        "  }\n\n"
+        "DO: Include at least 4-6 classes with their fields and methods.\n"
+        "DO: Show at least 3 different relationship types.\n"
+        "DO NOT: Include any explanation text, only output PlantUML between @startuml and @enduml.\n"
     ),
     "sequence_diagram": (
-        "Generate a valid PlantUML sequence diagram showing the interactions "
-        "between the classes in the context. Focus on method call chains. "
-        "Output ONLY the PlantUML code between @startuml and @enduml."
+        "Generate a valid, DETAILED PlantUML sequence diagram from the code context.\n\n"
+        "STRUCTURAL REQUIREMENTS:\n"
+        "- Declare participants with stereotypes: participant \"ClassName\" as C1 <<Activity>>\n"
+        "- Use activate/deactivate for lifeline bars to show when objects are active\n"
+        "- Show method call arguments where known: C1 -> C2 : fetchUser(userId)\n"
+        "- Use return arrows (dashed): C2 --> C1 : User object\n"
+        "- Use combined fragments for control flow:\n"
+        "  * alt / else — conditional branches\n"
+        "  * opt — optional execution\n"
+        "  * loop — repeated calls\n"
+        "  * ref — reference to another interaction\n"
+        "- Add 'note right : ...' or 'note over C1,C2 : ...' for important logic steps\n"
+        "- Group related messages using 'group \"Label\"' blocks\n"
+        "- Show at least one complete request-response round-trip\n\n"
+        "STYLING (include at the top after @startuml):\n"
+        "  skinparam sequenceArrowThickness 2\n"
+        "  skinparam sequenceParticipantBorderColor #7c3aed\n"
+        "  skinparam sequenceParticipantBackgroundColor #1a1a2e\n"
+        "  skinparam sequenceParticipantFontColor #e2e8f0\n"
+        "  skinparam sequenceLifeLineBorderColor #06b6d4\n"
+        "  skinparam sequenceGroupBackgroundColor #2d2d44\n\n"
+        "DO: Show at least 5-8 meaningful message exchanges.\n"
+        "DO: Include at least one alt/opt/loop fragment.\n"
+        "DO NOT: Include any explanation text, only output PlantUML between @startuml and @enduml.\n"
     ),
     "activity_diagram": (
-        "Generate a valid PlantUML activity diagram showing navigation flows "
-        "and user interactions in this Android app. Use swimlanes for "
-        "different user journeys. Output ONLY the PlantUML code between "
-        "@startuml and @enduml."
+        "Generate a valid, DETAILED PlantUML activity diagram from the code context.\n\n"
+        "STRUCTURAL REQUIREMENTS:\n"
+        "- Use swimlanes with |Actor| or |Component| syntax to separate responsibilities\n"
+        "- Use proper activity node syntax: :Action description; (colon + semicolon)\n"
+        "- Use decision diamonds: if (condition?) then (yes) ... else (no) ... endif\n"
+        "- Use fork/join for parallel flows: fork ... fork again ... end fork\n"
+        "- Add 'note right : ...' for important business rules or side effects\n"
+        "- Use start and stop nodes: start ... stop\n"
+        "- Use (#color) for highlighting critical actions: :Critical Action;<<important>>\n"
+        "- Show at least 2-3 complete user flow paths from start to end\n\n"
+        "STYLING (include at the top after @startuml):\n"
+        "  skinparam ActivityDiamondBackgroundColor #7c3aed\n"
+        "  skinparam ActivityDiamondFontColor #e2e8f0\n"
+        "  skinparam ActivityBackgroundColor #1a1a2e\n"
+        "  skinparam ActivityBorderColor #06b6d4\n"
+        "  skinparam ActivityFontColor #e2e8f0\n"
+        "  skinparam SwimlaneBackgroundColor #0f172a\n"
+        "  skinparam SwimlaneBorderColor #334155\n\n"
+        "DO: Include all major navigation flows and user decision points.\n"
+        "DO: Use swimlanes to separate UI, business logic, and data layers.\n"
+        "DO NOT: Include any explanation text, only output PlantUML between @startuml and @enduml.\n"
     ),
     "dependency_graph": (
         "Generate valid Graphviz DOT syntax showing the dependency graph "
@@ -241,42 +330,174 @@ _ANALYSIS_INSTRUCTIONS = {
         "estimate time/space complexity, and suggest optimizations."
     ),
     "state_diagram": (
-        "Generate a valid PlantUML state diagram showing the lifecycle states "
-        "and state transitions of the Android component or class in the context. "
-        "Include lifecycle callbacks (onCreate, onResume, onPause, onDestroy), "
-        "guard conditions, and entry/exit actions. "
-        "Output ONLY the PlantUML code between @startuml and @enduml."
+        "Generate a valid, DETAILED PlantUML state diagram from the code context.\n\n"
+        "STRUCTURAL REQUIREMENTS:\n"
+        "- Define states with descriptions: state \"Displayed Name\" as S1\n"
+        "- Add entry/do/exit actions inside states:\n"
+        "  state S1 {\n"
+        "    S1 : entry / initializeData()\n"
+        "    S1 : do / listenForUpdates()\n"
+        "    S1 : exit / cleanupResources()\n"
+        "  }\n"
+        "- Use composite (nested) states for complex lifecycles: state \"ParentState\" as PS { state \"Child1\" as C1 }\n"
+        "- Show guard conditions on transitions: S1 --> S2 : onEvent [guardCondition]\n"
+        "- Use [*] for initial and final states: [*] --> S1 and S_final --> [*]\n"
+        "- Add 'note right of S1 : ...' for lifecycle callback explanations\n"
+        "- Include Android lifecycle states: Created, Started, Resumed, Paused, Stopped, Destroyed\n\n"
+        "STYLING (include at the top after @startuml):\n"
+        "  skinparam state {\n"
+        "    BackgroundColor #1a1a2e\n"
+        "    BorderColor #7c3aed\n"
+        "    FontColor #e2e8f0\n"
+        "    ArrowColor #06b6d4\n"
+        "    StartColor #4ade80\n"
+        "    EndColor #f87171\n"
+        "  }\n\n"
+        "DO: Show the complete lifecycle with at least 5-6 states and transitions.\n"
+        "DO: Include guard conditions and actions on transitions.\n"
+        "DO NOT: Include any explanation text, only output PlantUML between @startuml and @enduml.\n"
     ),
     "component_diagram": (
-        "Generate a valid PlantUML component diagram showing the Android "
-        "Manifest components (Activities, Services, BroadcastReceivers, "
-        "ContentProviders) and their interactions via Intents, bound services, "
-        "and content URIs. Group by functional area. "
-        "Output ONLY the PlantUML code between @startuml and @enduml."
+        "Generate a valid, DETAILED PlantUML component diagram from the code context.\n\n"
+        "STRUCTURAL REQUIREMENTS:\n"
+        "- Declare components with stereotypes: component \"Name\" <<Activity>> as C1\n"
+        "- Use [ComponentName] shorthand for simple components\n"
+        "- Define interfaces: interface \"InterfaceName\" as I1\n"
+        "- Show provided interfaces (lollipop): C1 --(  I1\n"
+        "- Show required interfaces (socket): C2 )--  I1\n"
+        "- Use package or rectangle blocks to group by functional area:\n"
+        "  package \"Authentication\" {\n"
+        "    [LoginActivity]\n"
+        "    [AuthRepository]\n"
+        "  }\n"
+        "- Label connections with interaction type: C1 --> C2 : Intent\n"
+        "- Show ports for external connections where applicable\n"
+        "- Include ALL component types found: Activities, Services, BroadcastReceivers, ContentProviders, Repositories\n\n"
+        "STYLING (include at the top after @startuml):\n"
+        "  skinparam component {\n"
+        "    BackgroundColor #1a1a2e\n"
+        "    BorderColor #7c3aed\n"
+        "    FontColor #e2e8f0\n"
+        "    ArrowColor #06b6d4\n"
+        "    StereotypeFontColor #a78bfa\n"
+        "  }\n"
+        "  skinparam package {\n"
+        "    BackgroundColor #0f172a\n"
+        "    BorderColor #334155\n"
+        "    FontColor #94a3b8\n"
+        "  }\n\n"
+        "DO: Show all manifest components and their interactions.\n"
+        "DO: Group components by feature area.\n"
+        "DO NOT: Include any explanation text, only output PlantUML between @startuml and @enduml.\n"
     ),
     "usecase_diagram": (
-        "Generate a valid PlantUML use case diagram identifying the actors "
-        "(User, Admin, External System) and all use cases based on the UI "
-        "Activities, Fragments, ViewModels, and API methods in the context. "
-        "Show include/extend relationships between use cases. "
-        "IMPORTANT: Always use parentheses for use case names in relationships, "
-        "e.g. 'User --> (Login)' NOT 'User --> Login'. "
-        "For use case definitions use: usecase \"Name\" as UC1. "
-        "Output ONLY the PlantUML code between @startuml and @enduml."
+        "Generate a valid, DETAILED PlantUML use case diagram from the code context.\n\n"
+        "STRUCTURAL REQUIREMENTS:\n"
+        "- Set layout direction: left to right direction\n"
+        "- Define actors: actor \"User\" as U1\n"
+        "- Define system boundary: rectangle \"App Name\" {\n"
+        "- Define use cases with aliases: usecase \"Login\" as UC1\n"
+        "- CRITICAL: Always wrap use case names in parentheses in relationships:\n"
+        "  U1 --> (Login)      ✓ CORRECT\n"
+        "  U1 --> Login         ✗ WRONG — will cause syntax error\n"
+        "- Show <<include>> relationships: (View Profile) ..> (Authenticate) : <<include>>\n"
+        "- Show <<extend>> relationships: (Reset Password) ..> (Login) : <<extend>>\n"
+        "- Add 'note right of UC1 : ...' for use case descriptions\n"
+        "- Group related use cases inside sub-rectangles if there are many\n\n"
+        "STYLING (include at the top after @startuml):\n"
+        "  left to right direction\n"
+        "  skinparam usecase {\n"
+        "    BackgroundColor #1a1a2e\n"
+        "    BorderColor #7c3aed\n"
+        "    FontColor #e2e8f0\n"
+        "    ArrowColor #06b6d4\n"
+        "    StereotypeFontColor #a78bfa\n"
+        "  }\n"
+        "  skinparam actor {\n"
+        "    BackgroundColor #1a1a2e\n"
+        "    BorderColor #4ade80\n"
+        "    FontColor #e2e8f0\n"
+        "  }\n"
+        "  skinparam rectangle {\n"
+        "    BackgroundColor #0f172a\n"
+        "    BorderColor #334155\n"
+        "    FontColor #94a3b8\n"
+        "  }\n\n"
+        "DO: Include at least 5-8 use cases derived from the actual code.\n"
+        "DO: Show at least one <<include>> and one <<extend>> relationship.\n"
+        "DO NOT: Include any explanation text, only output PlantUML between @startuml and @enduml.\n"
     ),
     "package_diagram": (
-        "Generate a valid PlantUML package diagram showing the package "
-        "structure grouped by architectural layers (Presentation, Domain, Data). "
-        "Draw dependency arrows between packages. Highlight any dependency "
-        "rule violations. "
-        "Output ONLY the PlantUML code between @startuml and @enduml."
+        "Generate a valid, DETAILED PlantUML package diagram from the code context.\n\n"
+        "STRUCTURAL REQUIREMENTS:\n"
+        "- Define packages with layer stereotypes and colors:\n"
+        "  package \"ui\" <<Presentation>> #1a1a2e {\n"
+        "    class LoginActivity\n"
+        "    class MainFragment\n"
+        "  }\n"
+        "- Use different colors per architectural layer:\n"
+        "  * Presentation/UI: #1e293b\n"
+        "  * Domain/Business Logic: #1a1a2e\n"
+        "  * Data/Repository: #0f172a\n"
+        "- Draw directional dependency arrows: ui ..> domain : uses\n"
+        "- Label arrows with relationship descriptions\n"
+        "- If a dependency VIOLATES clean architecture rules (e.g. Data -> UI), mark it:\n"
+        "  note on link : ⚠️ VIOLATION: Data layer should not depend on UI\n"
+        "- List the actual classes inside each package (at least the most important ones)\n"
+        "- Show sub-packages for deeper hierarchies when present\n\n"
+        "STYLING (include at the top after @startuml):\n"
+        "  skinparam packageStyle rectangle\n"
+        "  skinparam package {\n"
+        "    BorderColor #7c3aed\n"
+        "    FontColor #e2e8f0\n"
+        "    StereotypeFontColor #a78bfa\n"
+        "  }\n"
+        "  skinparam arrow {\n"
+        "    Color #06b6d4\n"
+        "    FontColor #94a3b8\n"
+        "  }\n\n"
+        "DO: Show all major packages with their key classes listed inside.\n"
+        "DO: Flag any dependency violations with notes.\n"
+        "DO NOT: Include any explanation text, only output PlantUML between @startuml and @enduml.\n"
     ),
     "deployment_diagram": (
-        "Generate a valid PlantUML deployment diagram showing the mobile "
-        "device node with the app, and external nodes: REST API servers, "
-        "databases (Room/SQLite), cloud services (Firebase), and third-party "
-        "SDKs. Label connections with protocols and libraries used. "
-        "Output ONLY the PlantUML code between @startuml and @enduml."
+        "Generate a valid, DETAILED PlantUML deployment diagram from the code context.\n\n"
+        "STRUCTURAL REQUIREMENTS:\n"
+        "- Use nested nodes for the device:\n"
+        "  node \"Android Device\" {\n"
+        "    node \"App Process\" {\n"
+        "      artifact \"AppName.apk\"\n"
+        "      component [Room DB] <<SQLite>>\n"
+        "    }\n"
+        "  }\n"
+        "- Use proper shapes for external systems:\n"
+        "  * database \"DB Name\" for databases\n"
+        "  * cloud \"Service Name\" for cloud services (Firebase, AWS, etc.)\n"
+        "  * node \"Server Name\" for REST API backends\n"
+        "- Label ALL connections with protocol and library:\n"
+        "  app --> api_server : HTTPS\\n(Retrofit + OkHttp)\n"
+        "- Show artifacts inside nodes: artifact \"SharedPreferences\"\n"
+        "- Include all external connections found in code: APIs, Firebase, analytics SDKs, ad networks\n"
+        "- Add 'note right of node : ...' describing the purpose\n\n"
+        "STYLING (include at the top after @startuml):\n"
+        "  skinparam node {\n"
+        "    BackgroundColor #1a1a2e\n"
+        "    BorderColor #7c3aed\n"
+        "    FontColor #e2e8f0\n"
+        "  }\n"
+        "  skinparam database {\n"
+        "    BackgroundColor #0f172a\n"
+        "    BorderColor #06b6d4\n"
+        "    FontColor #e2e8f0\n"
+        "  }\n"
+        "  skinparam cloud {\n"
+        "    BackgroundColor #1e293b\n"
+        "    BorderColor #4ade80\n"
+        "    FontColor #e2e8f0\n"
+        "  }\n\n"
+        "DO: Show all external services and their connection protocols.\n"
+        "DO: Use proper shapes (database, cloud, node, artifact).\n"
+        "DO NOT: Include any explanation text, only output PlantUML between @startuml and @enduml.\n"
     ),
     # ── Security & Code Quality Scans ──────────────────────────
     "sec_hardcoded_secrets": (

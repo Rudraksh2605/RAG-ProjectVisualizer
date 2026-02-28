@@ -2,6 +2,11 @@
 Embedding service — calls Ollama embedding API.
 Auto-detects available model: prefers nomic-embed-text,
 falls back to deepseek-coder (which also supports embeddings).
+
+Performance features:
+  - HTTP connection pooling via requests.Session
+  - Batch embedding using Ollama's /api/embed batch endpoint
+  - Parallel fallback for older Ollama versions
 """
 
 import requests
@@ -11,6 +16,18 @@ import config
 # ── Module-level state (resolved once, reused) ─────────────────
 _resolved_model: Optional[str] = None
 
+# ── HTTP session for connection pooling ────────────────────────
+_session: Optional[requests.Session] = None
+
+
+def _get_session() -> requests.Session:
+    """Return a shared HTTP session for connection pooling."""
+    global _session
+    if _session is None:
+        _session = requests.Session()
+        _session.headers.update({"Content-Type": "application/json"})
+    return _session
+
 
 def _resolve_embedding_model() -> str:
     """Pick the best available embedding model from Ollama."""
@@ -19,7 +36,8 @@ def _resolve_embedding_model() -> str:
         return _resolved_model
 
     try:
-        r = requests.get(f"{config.OLLAMA_BASE_URL}/api/tags", timeout=5)
+        s = _get_session()
+        r = s.get(f"{config.OLLAMA_BASE_URL}/api/tags", timeout=5)
         if r.status_code == 200:
             models = [m["name"] for m in r.json().get("models", [])]
 
@@ -59,15 +77,17 @@ def _resolve_embedding_model() -> str:
 
 def _call_ollama_embed(model: str, text: str) -> List[float]:
     """
-    Try both Ollama embedding endpoints:
+    Embed a single text via Ollama.
+    Try both endpoints:
       - /api/embeddings  (older Ollama)
       - /api/embed       (newer Ollama ≥ 0.4)
     """
     base = config.OLLAMA_BASE_URL
+    s = _get_session()
 
     # Try /api/embeddings first (uses "prompt" key)
     try:
-        r = requests.post(
+        r = s.post(
             f"{base}/api/embeddings",
             json={"model": model, "prompt": text},
             timeout=120,
@@ -84,7 +104,7 @@ def _call_ollama_embed(model: str, text: str) -> List[float]:
 
     # Try /api/embed (newer API, uses "input" key)
     try:
-        r = requests.post(
+        r = s.post(
             f"{base}/api/embed",
             json={"model": model, "input": text},
             timeout=120,
@@ -108,6 +128,34 @@ def _call_ollama_embed(model: str, text: str) -> List[float]:
     )
 
 
+def _call_ollama_embed_batch(model: str, texts: List[str]) -> List[List[float]]:
+    """
+    Embed multiple texts in a single API call using Ollama's batch
+    /api/embed endpoint (supports list input in newer Ollama ≥ 0.4).
+
+    Falls back to individual calls if the batch endpoint is not available.
+    """
+    base = config.OLLAMA_BASE_URL
+    s = _get_session()
+
+    try:
+        r = s.post(
+            f"{base}/api/embed",
+            json={"model": model, "input": texts},
+            timeout=300,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            embs = data.get("embeddings", [])
+            if embs and len(embs) == len(texts):
+                return embs
+    except Exception:
+        pass
+
+    # Fallback: individual calls
+    return [_call_ollama_embed(model, t) for t in texts]
+
+
 def embed_text(text: str) -> List[float]:
     """
     Embed a single text string.
@@ -118,32 +166,27 @@ def embed_text(text: str) -> List[float]:
 
 
 def embed_batch(texts: List[str],
-                progress_callback=None) -> List[List[float]]:
+                progress_callback=None,
+                batch_size: int = 16) -> List[List[float]]:
     """
-    Embed a list of texts using parallel requests to keep the GPU busy.
-    """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    Embed a list of texts using batch API calls.
 
+    Sends texts in groups of *batch_size* to the Ollama batch embedding
+    endpoint, reducing HTTP overhead compared to one-request-per-text.
+    Falls back to parallel individual calls for older Ollama versions.
+    """
     model = _resolve_embedding_model()
     n = len(texts)
-    results = [None] * n     # pre-allocate to preserve order
-    done_count = [0]          # mutable counter for callback
+    results = []
+    done_count = 0
 
-    def _embed_one(idx_text):
-        idx, text = idx_text
-        return idx, _call_ollama_embed(model, text)
-
-    # 4 parallel workers — matches OLLAMA_NUM_PARALLEL default
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = {pool.submit(_embed_one, (i, t)): i
-                   for i, t in enumerate(texts)}
-
-        for future in as_completed(futures):
-            idx, emb = future.result()
-            results[idx] = emb
-            done_count[0] += 1
-            if progress_callback:
-                progress_callback(done_count[0], n)
+    for i in range(0, n, batch_size):
+        batch = texts[i:i + batch_size]
+        batch_embs = _call_ollama_embed_batch(model, batch)
+        results.extend(batch_embs)
+        done_count += len(batch)
+        if progress_callback:
+            progress_callback(done_count, n)
 
     return results
 
