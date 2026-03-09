@@ -1,0 +1,12 @@
+fun clearAllContacts() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            contactRepository.clearAllSelectedContacts()
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    showClearContactsDialog = false,
+                    clearSuccess = true
+                )
+            }
+        }

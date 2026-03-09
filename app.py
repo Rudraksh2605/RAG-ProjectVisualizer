@@ -30,6 +30,44 @@ from generators.plantuml_gen import DIAGRAM_REGISTRY
 from utils.plantuml_renderer import render_to_bytesio, get_diagram_url
 from utils.parallel import run_parallel
 import config
+import base64
+import streamlit.components.v1 as components
+from pathlib import Path
+
+
+def _get_downloads_folder() -> Path:
+    """Get the user's Downloads folder path."""
+    return Path.home() / "Downloads"
+
+
+def _save_file(data, filename: str) -> str:
+    """Save file to Downloads folder. Returns the full path."""
+    downloads = _get_downloads_folder()
+    downloads.mkdir(exist_ok=True)
+    filepath = downloads / filename
+    if isinstance(data, str):
+        filepath.write_text(data, encoding="utf-8")
+    else:
+        filepath.write_bytes(data)
+    return str(filepath)
+
+
+def _js_download(data, filename: str, mime: str):
+    """Trigger a browser download with correct filename via JavaScript."""
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+    b64 = base64.b64encode(data).decode()
+    js = f"""
+    <script>
+    const link = document.createElement('a');
+    link.href = 'data:{mime};base64,{b64}';
+    link.download = '{filename}';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    </script>
+    """
+    components.html(js, height=0)
 
 
 # ── Cached helpers (avoid re-running on every Streamlit re-render) ──
@@ -337,18 +375,47 @@ with tab_uml:
             else:
                 puml = gen_func()
 
-        # ── Render the diagram as an image ──
-        st.markdown(f"### 📊 {selected_diagram}")
+        # Store in session state so data survives Streamlit reruns
+        st.session_state["last_puml"] = puml
+        st.session_state["last_diagram_name"] = selected_diagram
+
         with st.spinner("Rendering diagram image…"):
             img = render_to_bytesio(puml)
         if img:
-            st.image(img, caption=selected_diagram, use_container_width=True)
-            img.seek(0)
-            st.download_button(
-                "🖼️ Download PNG", img.read(),
-                file_name=f"{selected_diagram.lower().replace(' ', '_')}.png",
-                mime="image/png", key="dl_single_png",
-            )
+            st.session_state["last_png"] = img.getvalue()  # store raw bytes
+        else:
+            st.session_state["last_png"] = None
+
+    # ── Display results from session state (persists across reruns) ──
+    if "last_puml" in st.session_state and st.session_state["last_puml"]:
+        puml = st.session_state["last_puml"]
+        diagram_name = st.session_state.get("last_diagram_name", "Diagram")
+        png_bytes = st.session_state.get("last_png")
+        safe_name = diagram_name.lower().replace(" ", "_")
+
+        st.markdown(f"### 📊 {diagram_name}")
+        if png_bytes:
+            st.image(png_bytes, caption=diagram_name, use_container_width=True)
+
+            # Download buttons — save directly to Downloads folder
+            dl_col1, dl_col2, dl_col3 = st.columns(3)
+            with dl_col1:
+                if st.button("🖼️ Save as PNG", key="save_png"):
+                    path = _save_file(png_bytes, f"{safe_name}.png")
+                    st.success(f"✅ Saved to `{path}`")
+            with dl_col2:
+                if st.button("📷 Save as JPG", key="save_jpg"):
+                    from PIL import Image
+                    from io import BytesIO
+                    img = Image.open(BytesIO(png_bytes)).convert("RGB")
+                    jpg_buf = BytesIO()
+                    img.save(jpg_buf, format="JPEG", quality=95)
+                    path = _save_file(jpg_buf.getvalue(), f"{safe_name}.jpg")
+                    st.success(f"✅ Saved to `{path}`")
+            with dl_col3:
+                if st.button("💾 Save .puml", key="save_puml"):
+                    path = _save_file(puml, f"{safe_name}.puml")
+                    st.success(f"✅ Saved to `{path}`")
         else:
             st.error(
                 "⚠️ Could not render the diagram image. The PlantUML syntax "
@@ -358,14 +425,9 @@ with tab_uml:
 
         with st.expander(
             "📝 View PlantUML Source Code",
-            expanded=not bool(img),
+            expanded=not bool(png_bytes),
         ):
             st.code(puml, language="plantuml")
-        st.download_button(
-            "💾 Download .puml", puml,
-            file_name=f"{selected_diagram.lower().replace(' ', '_')}.puml",
-            mime="text/plain", key="dl_single_puml",
-        )
 
     # ── Batch diagram generation (parallel) ──
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)

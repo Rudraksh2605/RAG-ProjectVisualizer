@@ -142,10 +142,9 @@ DIAGRAM_SPECS: Dict[str, dict] = {
 #  Registry — maps display names to (generator_key, needs_focus)
 # ═══════════════════════════════════════════════════════════════
 
-DIAGRAM_REGISTRY = {
-    spec["display_name"]: (key, spec.get("has_focus", False))
-    for key, spec in DIAGRAM_SPECS.items()
-}
+# Built after the wrapper functions are defined (see below).
+# Placeholder — populated at module bottom.
+DIAGRAM_REGISTRY = {}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -244,6 +243,26 @@ def generate_navigation_diagram() -> str:
     return generate_diagram("navigation_diagram")
 
 
+# ── Now populate DIAGRAM_REGISTRY with actual callable functions ──
+# app.py expects: display_name -> (callable, needs_focus)
+_WRAPPER_MAP = {
+    "class_diagram":      generate_class_diagram,
+    "sequence_diagram":   generate_sequence_diagram,
+    "activity_diagram":   generate_activity_diagram,
+    "state_diagram":      generate_state_diagram,
+    "component_diagram":  generate_component_diagram,
+    "usecase_diagram":    generate_usecase_diagram,
+    "package_diagram":    generate_package_diagram,
+    "deployment_diagram": generate_deployment_diagram,
+    "navigation_diagram": generate_navigation_diagram,
+}
+
+DIAGRAM_REGISTRY.update({
+    spec["display_name"]: (_WRAPPER_MAP[key], spec.get("has_focus", False))
+    for key, spec in DIAGRAM_SPECS.items()
+})
+
+
 # ═══════════════════════════════════════════════════════════════
 #  Parallel generation — generate multiple diagrams concurrently
 # ═══════════════════════════════════════════════════════════════
@@ -288,18 +307,53 @@ def generate_diagrams_parallel(
 
 _DEFAULT_SKINPARAMS = {
     'defaultFontName': '"Segoe UI"',
-    'defaultFontSize': '12',
+    'defaultFontSize': '13',
     'shadowing': 'false',
-    'roundCorner': '8',
-    'BackgroundColor': '#0f172a',
-    'ArrowColor': '#06b6d4',
-    'ArrowFontColor': '#94a3b8',
-    'ArrowFontSize': '11',
-    'noteBorderColor': '#334155',
-    'noteBackgroundColor': '#1e293b',
-    'noteFontColor': '#e2e8f0',
-    'titleFontSize': '16',
-    'titleFontColor': '#e2e8f0',
+    'roundCorner': '10',
+    'BackgroundColor': '#FEFEFE',
+    'ArrowColor': '#1565C0',
+    'ArrowFontColor': '#333333',
+    'ArrowFontSize': '12',
+    'ArrowThickness': '1.5',
+    'noteBorderColor': '#FFB300',
+    'noteBackgroundColor': '#FFF9C4',
+    'noteFontColor': '#333333',
+    'titleFontSize': '18',
+    'titleFontColor': '#1a1a2e',
+    'titleFontStyle': 'bold',
+    'ClassBackgroundColor': '#E3F2FD',
+    'ClassBorderColor': '#1976D2',
+    'ClassFontColor': '#1a1a2e',
+    'ClassAttributeFontColor': '#37474F',
+    'ClassStereotypeFontColor': '#7B1FA2',
+    'PackageBackgroundColor': '#F3E5F5',
+    'PackageBorderColor': '#7B1FA2',
+    'PackageFontColor': '#4A148C',
+    'ComponentBackgroundColor': '#E8F5E9',
+    'ComponentBorderColor': '#388E3C',
+    'ComponentFontColor': '#1B5E20',
+    'UsecaseBackgroundColor': '#E3F2FD',
+    'UsecaseBorderColor': '#1565C0',
+    'UsecaseFontColor': '#0D47A1',
+    'ActorBorderColor': '#1565C0',
+    'ActorFontColor': '#1a1a2e',
+    'StateBackgroundColor': '#E8EAF6',
+    'StateBorderColor': '#283593',
+    'StateFontColor': '#1A237E',
+    'ParticipantBackgroundColor': '#E3F2FD',
+    'ParticipantBorderColor': '#1565C0',
+    'ParticipantFontColor': '#0D47A1',
+    'DatabaseBackgroundColor': '#FFF3E0',
+    'DatabaseBorderColor': '#E65100',
+    'DatabaseFontColor': '#BF360C',
+    'CloudBackgroundColor': '#E0F7FA',
+    'CloudBorderColor': '#00838F',
+    'CloudFontColor': '#006064',
+    'NodeBackgroundColor': '#F3E5F5',
+    'NodeBorderColor': '#6A1B9A',
+    'NodeFontColor': '#4A148C',
+    'SequenceLifeLineBorderColor': '#1565C0',
+    'SequenceGroupBackgroundColor': '#E8EAF6',
 }
 
 # Regex to parse skinparam lines: "skinparam key value" or "skinparam key { ... }"
@@ -513,6 +567,50 @@ def _validate_plantuml(code: str, diagram_type: str = "general") -> Tuple[bool, 
     return True, ""
 
 
+# ── Patterns to detect duplicate element declarations ──
+_RE_ELEMENT_DECL = re.compile(
+    r'^\s*(usecase|class|state|participant|actor|component|database|cloud|node|artifact)\s+'
+    r'(?:"[^"]*"|\'[^\']*\'|\S+)',
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _remove_duplicate_elements(code: str) -> str:
+    """
+    Remove duplicate element declarations (usecase, class, state, etc.).
+    Keeps only the first occurrence of each unique declaration.
+    """
+    seen = set()
+    lines = code.split("\n")
+    result = []
+    for line in lines:
+        m = _RE_ELEMENT_DECL.match(line.strip())
+        if m:
+            key = m.group(0).strip().lower()
+            # Normalize whitespace for comparison
+            key = " ".join(key.split())
+            if key in seen:
+                continue  # skip duplicate
+            seen.add(key)
+        result.append(line)
+    return "\n".join(result)
+
+
+def _strip_llm_skinparams(code: str) -> str:
+    """
+    Remove all LLM-generated skinparam lines and blocks.
+    Our _inject_skinparam will add the correct theme later.
+    """
+    # Remove simple skinparam lines
+    code = _RE_SKINPARAM_LINE.sub("", code)
+    # Remove skinparam blocks like: skinparam class { ... }
+    code = re.sub(
+        r'skinparam\s+\w+\s*\{[^}]*\}',
+        '', code, flags=re.IGNORECASE | re.DOTALL,
+    )
+    return code
+
+
 def _repair_plantuml(code: str) -> str:
     """
     Attempt common automatic fixes on PlantUML code.
@@ -534,6 +632,12 @@ def _repair_plantuml(code: str) -> str:
     header = code[start:start + len("@startuml")]
     footer = code[end - len("@enduml"):end]
     body = code[start + len("@startuml"):end - len("@enduml")]
+
+    # ── Strip LLM-generated skinparams (our theme will be injected later) ──
+    body = _strip_llm_skinparams(body)
+
+    # ── Remove duplicate element declarations ──
+    body = _remove_duplicate_elements(body)
 
     # ── Fix Kotlin/C++ style inheritance: "class Foo : Bar" → "class Foo extends Bar" ──
     body = _RE_COLON_EXTENDS.sub(r'\1 extends \2', body)
@@ -561,7 +665,6 @@ def _repair_plantuml(code: str) -> str:
     activate_count = len(re.findall(r'\bactivate\b', body))
     deactivate_count = len(re.findall(r'\bdeactivate\b', body))
     if activate_count > deactivate_count:
-        # Find the last activated participant and deactivate it
         activate_matches = list(re.finditer(r'\bactivate\s+(\w+)', body))
         for _ in range(activate_count - deactivate_count):
             if activate_matches:

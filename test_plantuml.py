@@ -262,9 +262,9 @@ class TestRegistryConsistency:
             display = DIAGRAM_SPECS[key]["display_name"]
             assert display in DIAGRAM_REGISTRY, f"{display} missing from DIAGRAM_REGISTRY"
 
-    def test_registry_entries_point_to_valid_specs(self):
-        for display_name, (key, _) in DIAGRAM_REGISTRY.items():
-            assert key in DIAGRAM_SPECS, f"Registry entry '{display_name}' points to unknown spec key '{key}'"
+    def test_registry_entries_are_callable(self):
+        for display_name, (func, _) in DIAGRAM_REGISTRY.items():
+            assert callable(func), f"Registry entry '{display_name}' is not callable: {type(func)}"
 
     def test_all_specs_have_required_fields(self):
         for key, spec in DIAGRAM_SPECS.items():
