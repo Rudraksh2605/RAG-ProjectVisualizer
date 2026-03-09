@@ -21,6 +21,7 @@ MODEL_ROUTING = {
     "usecase_diagram": "qwen2.5-coder",
     "package_diagram": "qwen2.5-coder",
     "deployment_diagram": "qwen2.5-coder",
+    "navigation_diagram": "qwen2.5-coder",
     "doc_overview": "qwen2.5-coder",        # Documentation
     "doc_architecture": "qwen2.5-coder",
     "doc_features": "qwen2.5-coder",

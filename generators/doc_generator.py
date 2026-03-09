@@ -6,10 +6,39 @@ with the appropriate analysis_type and optional layer filter.
 Supports parallel generation of all sections via ThreadPoolExecutor.
 """
 
+import re
 from typing import Dict
 from core import rag_engine
 from utils.parallel import run_parallel
 import config
+
+
+def _strip_duplicate_title(content: str, title: str) -> str:
+    """Remove the leading heading from LLM content if it duplicates the section title.
+
+    The LLM often starts its response with a heading like ``### 📋 Project Overview``
+    even though we already wrap the section with ``## 📋 Project Overview``.  This
+    helper strips the first heading line when it is a near-duplicate of *title*.
+    """
+    # Strip the emoji prefix for comparison (e.g. "📋 " -> "Project Overview")
+    plain_title = re.sub(r'^[^\w]*', '', title).strip().lower()
+    lines = content.split('\n')
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Check if the first non-empty line is a markdown heading
+        if stripped.startswith('#'):
+            heading_text = stripped.lstrip('#').strip()
+            plain_heading = re.sub(r'^[^\w]*', '', heading_text).strip().lower()
+            if plain_title and plain_heading and (
+                plain_title in plain_heading or plain_heading in plain_title
+            ):
+                # Remove this duplicate heading line
+                lines.pop(i)
+                return '\n'.join(lines).strip()
+        break  # first non-empty line isn't a heading, nothing to strip
+    return content
 
 
 # Section definitions: (key, display_title, analysis_type, layer_filter)
@@ -77,5 +106,6 @@ def generate_full_report(progress_callback=None) -> str:
     parts = ["# 📖 Project Documentation\n"]
     for key, title, _, _ in SECTIONS:
         content = sections.get(key, "")
+        content = _strip_duplicate_title(content, title)
         parts.append(f"## {title}\n\n{content}\n")
     return "\n---\n\n".join(parts)
