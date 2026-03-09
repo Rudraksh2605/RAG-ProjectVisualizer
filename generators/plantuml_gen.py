@@ -101,11 +101,12 @@ DIAGRAM_SPECS: Dict[str, dict] = {
     "usecase_diagram": {
         "display_name": "Use Case Diagram",
         "query_default": (
-            "Show 5-7 use cases derived from actual app features, "
-            "the actors, and include/extend relationships."
+            "List ALL Activities, Fragments, and user-facing features in this app. "
+            "Include ALL screen names, button handlers, intent launches, menu items, "
+            "and navigation actions. Show every feature the user can access."
         ),
         "has_focus": False,
-        "top_k": 15,
+        "top_k": 30,
     },
     "package_diagram": {
         "display_name": "Package Diagram",
@@ -128,11 +129,13 @@ DIAGRAM_SPECS: Dict[str, dict] = {
     "navigation_diagram": {
         "display_name": "Navigation Diagram",
         "query_default": (
-            "Show every Activity/Fragment as a screen node, the app entry/exit points, "
-            "and user actions that trigger transitions between screens."
+            "List EVERY Activity and Fragment in this project. For each one, list ALL "
+            "Intent launches, startActivity calls, fragment transactions, navigation actions, "
+            "and button click handlers that navigate to other screens. Include the launcher "
+            "Activity and all back navigation. Show ALL screens, not just a subset."
         ),
         "has_focus": False,
-        "top_k": 15,
+        "top_k": 40,
         "layer_filter": "UI",
     },
 }

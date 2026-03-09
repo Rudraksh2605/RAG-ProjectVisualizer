@@ -398,7 +398,7 @@ _ANALYSIS_INSTRUCTIONS = {
         "  note right of UC3 : Earns XP on completion\n"
         "  @enduml\n\n"
         "DO NOT: Include any explanation text outside @startuml/@enduml.\n"
-        "DO NOT: Include more than 7 use cases — focus on the core features.\n"
+        "DO NOT: Omit any use cases or features found in the context. Show EVERYTHING.\n"
         "DO NOT: Include any skinparam or styling — styling is handled automatically.\n"
     ),
     "package_diagram": (
@@ -446,7 +446,7 @@ _ANALYSIS_INSTRUCTIONS = {
         "- LABEL EVERY transition with the USER ACTION that triggers it:\n"
         "  S1 --> S2 : taps \"Start Course\"\n"
         "  S3 --> [*] : presses Back\n"
-        "- Show 5-10 screens max — only real Activity/Fragment classes from the code\n"
+        "- Show ALL screens — only real Activity/Fragment classes from the code\n"
         "- Group related screens if needed using composite states\n"
         "- Add 'note right of S1 : ...' OUTSIDE state blocks for important entry conditions\n"
         "- NEVER put note directives inside state { } blocks\n"
@@ -455,6 +455,7 @@ _ANALYSIS_INSTRUCTIONS = {
         "ANTI-DUPLICATION: Define each state/screen EXACTLY ONCE. Never repeat a state declaration.\n\n"
         "DO NOT: Include any explanation text outside @startuml/@enduml.\n"
         "DO NOT: Invent screens — only use Activity/Fragment classes found in the code.\n"
+        "DO NOT: Filter or limit the number of screens. Show ALL screens.\n"
         "DO NOT: Include any skinparam or styling — styling is handled automatically.\n"
     ),
     # ── Security & Code Quality Scans ──────────────────────────
