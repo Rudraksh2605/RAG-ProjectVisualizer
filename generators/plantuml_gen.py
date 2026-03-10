@@ -101,9 +101,9 @@ DIAGRAM_SPECS: Dict[str, dict] = {
     "usecase_diagram": {
         "display_name": "Use Case Diagram",
         "query_default": (
-            "List ALL Activities, Fragments, and user-facing features in this app. "
-            "Include ALL screen names, button handlers, intent launches, menu items, "
-            "and navigation actions. Show every feature the user can access."
+            "Describe the distinct business features and user capabilities in this app. "
+            "Focus on actions the user can take (e.g., 'Take a Quiz', 'View Profile', 'Register Account', 'Chat with Bot') "
+            "rather than just listing UI screens. Summarize the core functionalities and their relationships."
         ),
         "has_focus": False,
         "top_k": 30,
