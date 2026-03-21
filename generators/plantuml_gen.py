@@ -577,6 +577,18 @@ _RE_ELEMENT_DECL = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
+# Pattern to match package blocks with their contents
+_RE_PACKAGE_BLOCK = re.compile(
+    r'package\s+"([^"]+)"\s*\{([^}]*)\}',
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Pattern to match bare element names (with optional stereotype) inside packages
+_RE_BARE_ELEMENT = re.compile(
+    r'^\s*(?:<<\w+>>\s+)?(\w+)\s*$',
+    re.MULTILINE,
+)
+
 
 def _remove_duplicate_elements(code: str) -> str:
     """
@@ -597,6 +609,77 @@ def _remove_duplicate_elements(code: str) -> str:
             seen.add(key)
         result.append(line)
     return "\n".join(result)
+
+
+def _deduplicate_package_members(code: str) -> str:
+    """
+    Detect element names that appear in multiple package blocks and
+    alias duplicates by appending the package name as a suffix.
+    Also updates all arrow references to use the new aliased name.
+
+    Example:
+        package "Home Screen" { <<Adapter>> ArticleAdapter }
+        package "Article Feature" { <<Adapter>> ArticleAdapter }
+    becomes:
+        package "Home Screen" { <<Adapter>> ArticleAdapter }
+        package "Article Feature" { <<Adapter>> ArticleAdapter_ArticleFeature }
+    with arrow references updated accordingly.
+    """
+    # Collect all (element_name, package_name) pairs
+    pkg_elements = {}  # element_name -> [package_name, ...]
+    for pkg_match in _RE_PACKAGE_BLOCK.finditer(code):
+        pkg_name = pkg_match.group(1)
+        pkg_body = pkg_match.group(2)
+        for elem_match in _RE_BARE_ELEMENT.finditer(pkg_body):
+            elem_name = elem_match.group(1)
+            if elem_name.lower() in ("end", "start", "stop"):
+                continue
+            pkg_elements.setdefault(elem_name, []).append(pkg_name)
+
+    # Find elements appearing in more than one package
+    duplicates = {name: pkgs for name, pkgs in pkg_elements.items() if len(pkgs) > 1}
+    if not duplicates:
+        return code
+
+    # For each duplicate, alias all occurrences except the first
+    rename_map = {}  # (element_name, package_name) -> new_alias
+    for elem_name, pkgs in duplicates.items():
+        for pkg_name in pkgs[1:]:  # keep first occurrence as-is
+            safe_pkg = re.sub(r'\W+', '', pkg_name)
+            alias = f"{elem_name}_{safe_pkg}"
+            rename_map[(elem_name, pkg_name)] = alias
+
+    # Apply renames inside package blocks
+    def _replace_in_package(match):
+        pkg_name = match.group(1)
+        pkg_body = match.group(2)
+        for (elem, pkg), alias in rename_map.items():
+            if pkg == pkg_name:
+                # Replace the bare element name inside this package body
+                pkg_body = re.sub(
+                    rf'(<<\w+>>\s+)?{re.escape(elem)}(\s*)$',
+                    rf'\g<1>{alias}\2',
+                    pkg_body,
+                    flags=re.MULTILINE,
+                )
+        return f'package "{pkg_name}" {{{pkg_body}}}'
+
+    code = _RE_PACKAGE_BLOCK.sub(_replace_in_package, code)
+
+    # Update arrow references outside packages
+    for (elem_name, pkg_name), alias in rename_map.items():
+        # Replace references in arrows: "OldName -->" or "--> OldName"
+        code = re.sub(
+            rf'(?<=\s){re.escape(elem_name)}(?=\s*(?:--|\.\.|\-\->|<))',
+            alias, code,
+        )
+        code = re.sub(
+            rf'(?<=-->?\s){re.escape(elem_name)}(?=\s|$)',
+            alias, code,
+            flags=re.MULTILINE,
+        )
+
+    return code
 
 
 def _strip_llm_skinparams(code: str) -> str:
@@ -642,6 +725,9 @@ def _repair_plantuml(code: str) -> str:
     # ── Remove duplicate element declarations ──
     body = _remove_duplicate_elements(body)
 
+    # ── Alias duplicate names across different package blocks ──
+    body = _deduplicate_package_members(body)
+
     # ── Fix Kotlin/C++ style inheritance: "class Foo : Bar" → "class Foo extends Bar" ──
     body = _RE_COLON_EXTENDS.sub(r'\1 extends \2', body)
 
@@ -660,6 +746,34 @@ def _repair_plantuml(code: str) -> str:
 
     # ── Fix notes trapped inside state/class blocks ──
     body = _RE_NOTE_INSIDE_BLOCK.sub(r'\1\n\2', body)
+
+    # ── Fix invalid "-> |Swimlane|" syntax in activity diagrams ──
+    # LLMs often generate "-> |User|" but PlantUML expects just "|User|"
+    body = re.sub(r'->\s*(\|[^|]+\|)', r'\1', body)
+
+    # ── Fix swimlane ordering: "start" must come AFTER the first swimlane ──
+    # PlantUML requires: |Swimlane| \n start   (not: start \n |Swimlane|)
+    if re.search(r'\|[^|]+\|', body):
+        lines = body.split("\n")
+        start_idx = None
+        first_swimlane_idx = None
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.lower() == "start" and start_idx is None:
+                start_idx = i
+            if re.match(r'^\s*\|[^|]+\|\s*$', stripped) and first_swimlane_idx is None:
+                first_swimlane_idx = i
+        # If "start" comes before the first swimlane, move it after
+        if (start_idx is not None and first_swimlane_idx is not None
+                and start_idx < first_swimlane_idx):
+            start_line = lines.pop(start_idx)
+            # After popping, the swimlane index shifts down by 1
+            lines.insert(first_swimlane_idx, start_line)
+            body = "\n".join(lines)
+
+    # ── Remove invalid "-> (SomeName);" standalone goto lines ──
+    # LLMs generate these as "go to" statements but PlantUML doesn't support them
+    body = re.sub(r'^\s*->\s*\([^)]+\)\s*;?\s*$', '', body, flags=re.MULTILINE)
 
     # ── Remove stray HTML tags ──
     body = _RE_HTML_TAGS.sub('', body)

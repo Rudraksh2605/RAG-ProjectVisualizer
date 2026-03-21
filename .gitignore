@@ -1,0 +1,20 @@
+# Project Caches
+.chroma_db/
+*__pycache__/*
+
+# Compiled Python files
+*.pyc
+*.pyo
+*.pyd
+
+# IDE & Editor Folders
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Project metadata (already handled but for completeness)
+.gradle/
+build/
+bin/
+node_modules/
