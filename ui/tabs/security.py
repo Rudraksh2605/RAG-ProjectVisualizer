@@ -1,5 +1,6 @@
 import streamlit as st
 from generators import security_scanner
+from ui.sidebar import _cached_ollama_status
 import config
 
 def render():
@@ -35,9 +36,23 @@ def render():
                 st.info(f"**{icon} {name}:** {desc}")
                 break
 
-        if st.button("🔍 Run Scan", key="run_single_scan"):
-            with st.spinner(f"Scanning {selected_cat_display}…"):
-                result = security_scanner.scan_category(selected_cat_key)
+        with st.popover("🔍 Run Scan"):
+            status = _cached_ollama_status()
+            models = status.get("models", [])
+            if not models:
+                models = [config.LLM_MODEL]
+            
+            default_model = getattr(config, "MODEL_ROUTING", {}).get(selected_cat_key, config.LLM_MODEL)
+            idx = models.index(default_model) if default_model in models else 0
+            selected_model = st.selectbox("LLM Model:", models, index=idx, key="sec_single_mod")
+            
+            if st.button("Confirm Generate", key="run_single_scan_btn"):
+                st.session_state["do_run_single_scan"] = selected_model
+
+        if st.session_state.get("do_run_single_scan"):
+            selected_model = st.session_state.pop("do_run_single_scan")
+            with st.spinner(f"Scanning {selected_cat_display} ({selected_model})…"):
+                result = security_scanner.scan_category(selected_cat_key, target_model=selected_model)
 
             if result.get("error"):
                 st.error(f"Scan error: {result['error']}")
@@ -95,12 +110,18 @@ def render():
             key="scan_cats_multi",
         )
 
-        if st.button(
-            "🚀 Run Full Scan",
-            key="run_full_scan",
-            disabled=len(selected_cats) == 0,
-        ):
-            progress = st.progress(0, text="Starting security scan…")
+        with st.popover("🚀 Run Full Scan", disabled=len(selected_cats) == 0):
+            status = _cached_ollama_status()
+            models = status.get("models", [])
+            if not models:
+                models = [config.LLM_MODEL]
+            selected_model_batch = st.selectbox("LLM Model (for all):", models, key="sec_batch_mod")
+            if st.button("Confirm Batch Run", key="run_batch_scan_btn"):
+                st.session_state["do_run_batch_scan"] = selected_model_batch
+
+        if st.session_state.get("do_run_batch_scan"):
+            selected_model = st.session_state.pop("do_run_batch_scan")
+            progress = st.progress(0, text=f"Starting security scan ({selected_model})…")
             step_count = [0]
             total_cats = len(selected_cats)
 
@@ -117,6 +138,7 @@ def render():
                 scan_results = security_scanner.scan_all(
                     category_keys=selected_cats,
                     progress_callback=_scan_progress,
+                    target_model=selected_model,
                 )
             progress.progress(1.0, text="✅ Scan complete!")
 

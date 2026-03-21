@@ -156,7 +156,8 @@ SEVERITY_ICONS = {
 # ═══════════════════════════════════════════════════════════════
 
 def scan_category(category_key: str,
-                  _prebuilt_context: str = None) -> Dict:
+                  _prebuilt_context: str = None,
+                  target_model: str = None) -> Dict:
     """
     Run a security/code-quality scan for a single category.
 
@@ -200,9 +201,10 @@ def scan_category(category_key: str,
             from core.rag_engine import _build_prompt
             from core.ollama_client import generate
             prompt = _build_prompt(question, _prebuilt_context, analysis_type)
-            target_model = getattr(config, "MODEL_ROUTING", {}).get(
-                analysis_type, config.LLM_MODEL
-            )
+            if target_model is None:
+                target_model = getattr(config, "MODEL_ROUTING", {}).get(
+                    analysis_type, config.LLM_MODEL
+                )
             raw = generate(prompt, model=target_model)
         else:
             # Normal path: full RAG query (embed → retrieve → generate)
@@ -211,6 +213,7 @@ def scan_category(category_key: str,
                 analysis_type=analysis_type,
                 top_k=top_k,
                 layer_filter=layer_filter,
+                target_model=target_model,
             )
         findings = _parse_findings(raw)
         # Sort by severity
@@ -242,6 +245,7 @@ def scan_category(category_key: str,
 def scan_all(
     category_keys: Optional[List[str]] = None,
     progress_callback: Optional[Callable] = None,
+    target_model: str = None,
 ) -> Dict[str, Dict]:
     """
     Run multiple scan categories in parallel.
@@ -288,10 +292,10 @@ def scan_all(
     def _make_scan_task(k):
         cat = _get_category(k)
         if not cat:
-            return lambda: scan_category(k)
+            return lambda: scan_category(k, target_model=target_model)
         _, _, _, _, _, top_k, layer_filter = cat
         ctx = context_cache.get((layer_filter, top_k))
-        return lambda: scan_category(k, _prebuilt_context=ctx)
+        return lambda: scan_category(k, _prebuilt_context=ctx, target_model=target_model)
 
     tasks = [(key, _make_scan_task(key)) for key in category_keys]
 

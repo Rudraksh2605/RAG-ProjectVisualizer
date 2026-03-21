@@ -163,9 +163,9 @@ DIAGRAM_REGISTRY = {}
 _diagram_cache: Dict[tuple, str] = {}
 
 
-def _cache_key(diagram_type: str, focus: Optional[str]) -> tuple:
+def _cache_key(diagram_type: str, focus: Optional[str], target_model: Optional[str] = None) -> tuple:
     fp = getattr(rag_engine, "_project_fingerprint", None)
-    return (diagram_type, focus or "", fp or "")
+    return (diagram_type, focus or "", fp or "", target_model or "")
 
 
 def clear_diagram_cache():
@@ -178,19 +178,20 @@ def clear_diagram_cache():
 #  Unified generator — replaces 9 copy-paste functions
 # ═══════════════════════════════════════════════════════════════
 
-def generate_diagram(diagram_type: str, focus: Optional[str] = None) -> str:
+def generate_diagram(diagram_type: str, focus: Optional[str] = None, target_model: str = None) -> str:
     """
     Generate a PlantUML diagram of the given type.
 
     Args:
         diagram_type: Key from DIAGRAM_SPECS (e.g. "class_diagram")
         focus:        Optional focus class/flow for types that support it
+        target_model: Optional LLM model name. If None, uses default routing.
 
     Returns:
         Valid PlantUML code string.
     """
     # Check cache first
-    key = _cache_key(diagram_type, focus)
+    key = _cache_key(diagram_type, focus, target_model)
     if key in _diagram_cache:
         log.info("Cache hit for %s (focus=%s)", diagram_type, focus)
         return _diagram_cache[key]
@@ -211,6 +212,7 @@ def generate_diagram(diagram_type: str, focus: Optional[str] = None) -> str:
         analysis_type=diagram_type,
         top_k=spec.get("top_k", config.RAG_TOP_K),
         layer_filter=spec.get("layer_filter"),
+        target_model=target_model,
     )
 
     result = _extract_and_validate(raw, diagram_type)
@@ -224,32 +226,32 @@ def generate_diagram(diagram_type: str, focus: Optional[str] = None) -> str:
 # ── Backward-compatible convenience wrappers ──────────────────
 # (so existing app.py code keeps working without changes)
 
-def generate_class_diagram(focus_class: str = None) -> str:
-    return generate_diagram("class_diagram", focus_class)
+def generate_class_diagram(focus_class: str = None, target_model: str = None) -> str:
+    return generate_diagram("class_diagram", focus_class, target_model)
 
-def generate_sequence_diagram(focus: str = None) -> str:
-    return generate_diagram("sequence_diagram", focus)
+def generate_sequence_diagram(focus: str = None, target_model: str = None) -> str:
+    return generate_diagram("sequence_diagram", focus, target_model)
 
-def generate_activity_diagram() -> str:
-    return generate_diagram("activity_diagram")
+def generate_activity_diagram(target_model: str = None) -> str:
+    return generate_diagram("activity_diagram", target_model=target_model)
 
-def generate_state_diagram(focus_class: str = None) -> str:
-    return generate_diagram("state_diagram", focus_class)
+def generate_state_diagram(focus_class: str = None, target_model: str = None) -> str:
+    return generate_diagram("state_diagram", focus_class, target_model)
 
-def generate_component_diagram() -> str:
-    return generate_diagram("component_diagram")
+def generate_component_diagram(target_model: str = None) -> str:
+    return generate_diagram("component_diagram", target_model=target_model)
 
-def generate_usecase_diagram() -> str:
-    return generate_diagram("usecase_diagram")
+def generate_usecase_diagram(target_model: str = None) -> str:
+    return generate_diagram("usecase_diagram", target_model=target_model)
 
-def generate_package_diagram() -> str:
-    return generate_diagram("package_diagram")
+def generate_package_diagram(target_model: str = None) -> str:
+    return generate_diagram("package_diagram", target_model=target_model)
 
-def generate_deployment_diagram() -> str:
-    return generate_diagram("deployment_diagram")
+def generate_deployment_diagram(target_model: str = None) -> str:
+    return generate_diagram("deployment_diagram", target_model=target_model)
 
-def generate_navigation_diagram() -> str:
-    return generate_diagram("navigation_diagram")
+def generate_navigation_diagram(target_model: str = None) -> str:
+    return generate_diagram("navigation_diagram", target_model=target_model)
 
 
 # ── Now populate DIAGRAM_REGISTRY with actual callable functions ──
@@ -279,6 +281,7 @@ DIAGRAM_REGISTRY.update({
 def generate_diagrams_parallel(
     diagram_types: List[str],
     focus_map: Optional[Dict[str, str]] = None,
+    target_model: str = None,
 ) -> Dict[str, str]:
     """
     Generate multiple diagrams in parallel using ThreadPoolExecutor.
@@ -296,7 +299,7 @@ def generate_diagrams_parallel(
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {
-            pool.submit(generate_diagram, dt, focus_map.get(dt)):  dt
+            pool.submit(generate_diagram, dt, focus_map.get(dt), target_model):  dt
             for dt in diagram_types
         }
         for future in as_completed(futures):

@@ -136,7 +136,8 @@ def query(question: str,
           analysis_type: str = "general",
           top_k: int = None,
           layer_filter: str = None,
-          type_filter: str = None) -> str:
+          type_filter: str = None,
+          target_model: str = None) -> str:
     """
     End-to-end RAG query:
       embed question → retrieve → build prompt → generate answer.
@@ -160,7 +161,8 @@ def query(question: str,
     context_blocks = _format_retrieved_context(results)
     
     # ── Multi-Model Routing ──
-    target_model = getattr(config, "MODEL_ROUTING", {}).get(analysis_type, config.LLM_MODEL)
+    if target_model is None:
+        target_model = getattr(config, "MODEL_ROUTING", {}).get(analysis_type, config.LLM_MODEL)
     prompt = _build_prompt(question, context_blocks, analysis_type, target_model)
     
     print(f"\n[LLM Router] Routing '{analysis_type}' task to model: {target_model}")
@@ -172,7 +174,8 @@ def query_stream(question: str,
                  analysis_type: str = "general",
                  top_k: int = None,
                  layer_filter: str = None,
-                 type_filter: str = None):
+                 type_filter: str = None,
+                 target_model: str = None):
     """
     Streaming version — yields tokens for the Streamlit chat UI.
     """
@@ -193,7 +196,8 @@ def query_stream(question: str,
     context_blocks = _format_retrieved_context(results)
 
     # ── Multi-Model Routing ──
-    target_model = getattr(config, "MODEL_ROUTING", {}).get(analysis_type, config.LLM_MODEL)
+    if target_model is None:
+        target_model = getattr(config, "MODEL_ROUTING", {}).get(analysis_type, config.LLM_MODEL)
     prompt = _build_prompt(question, context_blocks, analysis_type, target_model)
     print(f"\n[LLM Router] Routing stream '{analysis_type}' task to model: {target_model}")
 

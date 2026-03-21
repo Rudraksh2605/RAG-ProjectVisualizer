@@ -7,7 +7,7 @@ semantically-labelled DOT syntax.
 from core import rag_engine
 
 
-def generate_dependency_graph(focus_class: str = None) -> str:
+def generate_dependency_graph(focus_class: str = None, target_model: str = None) -> str:
     """
     Generate a Graphviz DOT dependency graph.
     """
@@ -23,7 +23,7 @@ def generate_dependency_graph(focus_class: str = None) -> str:
              "Label edges with relationship types (extends, implements, "
              "uses, injects, provides). Group nodes by architectural layer or DI module."
     )
-    raw = rag_engine.query(question, analysis_type="dependency_graph", top_k=12)
+    raw = rag_engine.query(question, analysis_type="dependency_graph", top_k=12, target_model=target_model)
     return _extract_dot(raw)
 
 

@@ -53,7 +53,7 @@ SECTIONS = [
 ]
 
 
-def generate_section(section_key: str) -> str:
+def generate_section(section_key: str, target_model: str = None) -> str:
     """Generate a single documentation section via RAG."""
     for key, title, atype, layer in SECTIONS:
         if key == section_key:
@@ -63,11 +63,12 @@ def generate_section(section_key: str) -> str:
                 analysis_type=atype,
                 top_k=10,
                 layer_filter=layer,
+                target_model=target_model,
             )
     return "(Unknown section)"
 
 
-def _make_section_task(key, title, atype, layer):
+def _make_section_task(key, title, atype, layer, target_model=None):
     """Create a closure that generates one section (for parallel execution)."""
     def _task():
         question = f"Generate the '{title}' documentation section for this project."
@@ -76,17 +77,18 @@ def _make_section_task(key, title, atype, layer):
             analysis_type=atype,
             top_k=10,
             layer_filter=layer,
+            target_model=target_model,
         )
     return _task
 
 
-def generate_all_sections(progress_callback=None) -> Dict[str, str]:
+def generate_all_sections(progress_callback=None, target_model: str = None) -> Dict[str, str]:
     """
     Generate ALL documentation sections in parallel and return them as
     {section_key: markdown_content}.
     """
     tasks = [
-        (key, _make_section_task(key, title, atype, layer))
+        (key, _make_section_task(key, title, atype, layer, target_model))
         for key, title, atype, layer in SECTIONS
     ]
 
@@ -98,11 +100,11 @@ def generate_all_sections(progress_callback=None) -> Dict[str, str]:
     return results
 
 
-def generate_full_report(progress_callback=None) -> str:
+def generate_full_report(progress_callback=None, target_model: str = None) -> str:
     """
     Generate a single Markdown document with all sections (in parallel).
     """
-    sections = generate_all_sections(progress_callback)
+    sections = generate_all_sections(progress_callback, target_model=target_model)
     parts = ["# 📖 Project Documentation\n"]
     for key, title, _, _ in SECTIONS:
         content = sections.get(key, "")

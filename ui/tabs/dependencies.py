@@ -2,6 +2,8 @@ import streamlit as st
 from generators import graphviz_gen
 from core import rag_engine
 from generators import analysis
+from ui.sidebar import _cached_ollama_status
+import config
 
 def render():
     """Renders the Dependency Graph tab."""
@@ -23,12 +25,26 @@ def render():
         )
         focus_dep = None if focus_dep_sel == "(All)" else focus_dep_sel
 
-    if st.button("🔗 Generate Graph", key="gen_dep"):
-        with st.spinner("Building dependency graph…"):
+    with st.popover("🔗 Generate Graph"):
+        status = _cached_ollama_status()
+        models = status.get("models", [])
+        if not models:
+            models = [config.LLM_MODEL]
+        
+        default_model = getattr(config, "MODEL_ROUTING", {}).get("dependency_graph", config.LLM_MODEL)
+        idx = models.index(default_model) if default_model in models else 0
+        selected_model = st.selectbox("LLM Model:", models, index=idx, key="dep_mod")
+        
+        if st.button("Confirm Generate", key="gen_dep_btn"):
+            st.session_state["do_gen_dep"] = selected_model
+
+    if st.session_state.get("do_gen_dep"):
+        selected_model = st.session_state.pop("do_gen_dep")
+        with st.spinner(f"Building dependency graph ({selected_model})…"):
             if dep_mode == "Layer Overview (deterministic)":
                 dot_code = graphviz_gen.generate_layer_graph()
             else:
-                dot_code = graphviz_gen.generate_dependency_graph(focus_dep)
+                dot_code = graphviz_gen.generate_dependency_graph(focus_dep, target_model=selected_model)
 
         st.markdown("### Graphviz DOT Output")
         try:
