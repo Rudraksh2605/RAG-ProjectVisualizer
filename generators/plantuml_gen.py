@@ -80,11 +80,15 @@ DIAGRAM_SPECS: Dict[str, dict] = {
         "display_name": "State Machine Diagram",
         "query_default": (
             "Show the lifecycle states and transitions for the main Activity or Fragment, "
-            "including callbacks and guards."
+            "including callbacks and guards. "
+            "IMPORTANT: If you use spaces in state names, you MUST declare them first "
+            "(e.g., `state \"My State\" as my_state`)."
         ),
         "query_focused": (
             "Show the lifecycle states and transitions for '{focus}', "
-            "including entry/exit actions and event guards."
+            "including entry/exit actions and event guards. "
+            "IMPORTANT: If you use spaces in state names, you MUST declare them first "
+            "(e.g., `state \"My State\" as my_state`)."
         ),
         "has_focus": True,
         "top_k": 15,
@@ -132,7 +136,9 @@ DIAGRAM_SPECS: Dict[str, dict] = {
             "List EVERY Activity and Fragment in this project. For each one, list ALL "
             "Intent launches, startActivity calls, fragment transactions, navigation actions, "
             "and button click handlers that navigate to other screens. Include the launcher "
-            "Activity and all back navigation. Show ALL screens, not just a subset."
+            "Activity and all back navigation. Show ALL screens, not just a subset. "
+            "IMPORTANT: If you use spaces in state names, you MUST declare them first "
+            "(e.g., `state \"My State\" as my_state`)."
         ),
         "has_focus": False,
         "top_k": 40,
@@ -866,7 +872,7 @@ def _test_render_kroki(code: str) -> Tuple[bool, str]:
 def _extract_and_validate(raw_llm_output: str,
                           analysis_type: str = "general") -> str:
     """
-    Full pipeline: extract → repair → validate → test-render → retry.
+    Full pipeline: extract → repair → validate → test-render → retry (max 3 times).
     """
     # Step 1: Extract
     code = _extract_plantuml(raw_llm_output)
@@ -874,39 +880,37 @@ def _extract_and_validate(raw_llm_output: str,
     # Step 2: Always run repair (it's idempotent on valid code)
     code = _repair_plantuml(code)
 
-    # Step 3: Local validation (now type-aware)
-    is_valid, error = _validate_plantuml(code, analysis_type)
-    if not is_valid:
-        log.warning("Local validation failed for %s: %s", analysis_type, error)
+    MAX_RETRIES = 3
+    for attempt in range(MAX_RETRIES):
+        # Step 3: Local validation (type-aware)
+        is_valid, error = _validate_plantuml(code, analysis_type)
+        if not is_valid:
+            log.warning("Local validation failed for %s (attempt %d): %s", analysis_type, attempt + 1, error)
+            try:
+                raw_retry = _retry_with_llm(code, error, analysis_type)
+                code = _repair_plantuml(raw_retry)
+                continue  # Go to next attempt to validate/test again
+            except Exception as e:
+                log.error("LLM retry error for %s: %s", analysis_type, e)
+                break
+
+        # Step 4: If local validation passes, test-render via Kroki
+        renderable, render_error = _test_render_kroki(code)
+        if renderable:
+            if attempt > 0:
+                log.info("LLM retry fixed Kroki rendering for %s", analysis_type)
+            return _inject_skinparam(code)
+
+        log.warning("Kroki test-render failed for %s (attempt %d): %s", analysis_type, attempt + 1, render_error)
+
+        # Step 5: If test-rendering fails, retry with LLM sending the error
         try:
-            retried = _retry_with_llm(code, error, analysis_type)
-            retried = _repair_plantuml(retried)
-            is_valid, _ = _validate_plantuml(retried, analysis_type)
-            if is_valid:
-                log.info("LLM retry fixed local validation for %s", analysis_type)
-                code = retried
-            else:
-                log.warning("LLM retry still has issues for %s, using best effort", analysis_type)
+            raw_retry = _retry_with_llm(code, render_error, analysis_type)
+            code = _repair_plantuml(raw_retry)
         except Exception as e:
             log.error("LLM retry error for %s: %s", analysis_type, e)
+            break
 
-    # Step 4: Test-render via Kroki
-    renderable, render_error = _test_render_kroki(code)
-    if renderable:
-        return _inject_skinparam(code)
-
-    log.warning("Kroki test-render failed for %s: %s", analysis_type, render_error)
-
-    # Step 5: LLM retry with Kroki error (only once)
-    try:
-        retried = _retry_with_llm(code, render_error, analysis_type)
-        retried = _repair_plantuml(retried)
-        renderable, _ = _test_render_kroki(retried)
-        if renderable:
-            log.info("LLM retry fixed Kroki rendering for %s", analysis_type)
-            return _inject_skinparam(retried)
-        log.warning("LLM retry still fails Kroki for %s, returning best effort", analysis_type)
-        return _inject_skinparam(retried)
-    except Exception as e:
-        log.error("LLM retry error for %s: %s", analysis_type, e)
-        return _inject_skinparam(code)
+    # If we exhaust retries or break early (Exception), return best effort
+    log.warning("Exhausted retries or encountered error for %s. Returning best effort.", analysis_type)
+    return _inject_skinparam(code)

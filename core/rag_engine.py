@@ -274,10 +274,19 @@ _ANALYSIS_INSTRUCTIONS = {
         "DO NOT: Include any skinparam or styling — styling is handled automatically.\n"
     ),
     "dependency_graph": (
-        "Generate valid Graphviz DOT syntax showing the dependency graph "
-        "of the classes in the context. Label edges with the relationship "
-        "type (extends, implements, uses, injects). "
-        "Output ONLY the DOT code between digraph { and the final }."
+        "Generate a CLEAN, READABLE Graphviz DOT dependency graph from the code context.\n\n"
+        "BEFORE GENERATING: Carefully read ALL code context. Identify classes, interfaces, "
+        "and EXPLICITLY look for Dependency Injection usage (Dagger, Hilt, Koin, qualifiers, "
+        "@Inject, @Provides, Modules, Components).\n\n"
+        "GOAL: Show the dependency graph including DI frameworks used in the project.\n\n"
+        "RULES:\n"
+        "- Generate valid Graphviz DOT syntax.\n"
+        "- Label edges with the precise relationship type (extends, implements, uses, injects, @Provides, @Binds).\n"
+        "- For Dagger/Hilt: Show Modules -> Components -> Injected Classes.\n"
+        "- For Koin: Show Modules -> single/factory/viewModel dependencies -> Injected Classes.\n"
+        "- Group nodes by architectural layer or DI Module using subgraphs (subgraph cluster_X).\n"
+        "- Use different shapes/colors for DI Modules/Components vs normal classes if possible (e.g., shape=folder for modules).\n"
+        "- Output ONLY the DOT code between digraph { and the final }, with no markdown blocks or other text."
     ),
     "doc_overview": (
         "Write a project overview including: App Name, Purpose (one paragraph), "

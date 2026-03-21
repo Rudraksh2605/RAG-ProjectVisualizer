@@ -13,13 +13,15 @@ def generate_dependency_graph(focus_class: str = None) -> str:
     """
     question = (
         f"Generate a Graphviz DOT dependency graph centered on '{focus_class}' "
-        f"showing all classes it depends on and all classes that depend on it. "
+        f"showing all classes it depends on, classes that depend on it, and any "
+        f"Dependency Injection (Dagger/Hilt/Koin) bindings involved. "
         f"Label each edge with the relationship type."
         if focus_class
         else "Generate a Graphviz DOT dependency graph showing the main "
-             "components of this project and their dependencies. "
+             "components of this project, their dependencies, and the Dependency Injection "
+             "(Dagger/Hilt/Koin) architecture connecting them. "
              "Label edges with relationship types (extends, implements, "
-             "uses, injects). Group nodes by architectural layer."
+             "uses, injects, provides). Group nodes by architectural layer or DI module."
     )
     raw = rag_engine.query(question, analysis_type="dependency_graph", top_k=12)
     return _extract_dot(raw)
