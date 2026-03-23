@@ -6,6 +6,7 @@ Uses two rendering backends for reliability:
   2. PlantUML server (fallback — classic URL-encoded GET)
 """
 
+import re
 import zlib
 import base64
 import requests
@@ -92,14 +93,22 @@ def _encode64(data: bytes) -> str:
     return "".join(result)
 
 
-def _render_via_plantuml_server(plantuml_code: str) -> Optional[bytes]:
-    """Render via the public PlantUML server (GET with encoded URL)."""
+def _render_via_plantuml_server(plantuml_code: str, accept_error_image: bool = False) -> Optional[bytes]:
+    """
+    Render via the public PlantUML server (GET with encoded URL).
+    If accept_error_image is True, accept HTTP 400 responses that
+    contain an image (PlantUML server returns error diagrams as PNG).
+    """
     try:
         encoded = _encode_plantuml(plantuml_code)
         url = f"{PLANTUML_SERVER}/png/{encoded}"
         r = requests.get(url, timeout=30)
         content_type = r.headers.get("content-type", "")
         if r.status_code == 200 and "image" in content_type and len(r.content) > 200:
+            return r.content
+        # Accept error images (HTTP 400 with image/png) as last resort
+        if accept_error_image and r.status_code == 400 and "image" in content_type and len(r.content) > 200:
+            print(f"[PlantUML Renderer] PlantUML server: returning error image ({len(r.content)} bytes)")
             return r.content
         print(
             f"[PlantUML Renderer] PlantUML server: HTTP {r.status_code}, "
@@ -119,10 +128,14 @@ def render_diagram(plantuml_code: str) -> Optional[bytes]:
     """
     Render PlantUML code to PNG bytes.
     Tries Kroki first, falls back to the PlantUML server.
+    As a last resort, accepts PlantUML error images so users can
+    at least see what went wrong.
     Returns PNG bytes, or None on failure.
     """
     # Clean up: ensure we only have the @startuml...@enduml block
     code = _clean_plantuml(plantuml_code)
+    # Final sanitization to catch any remaining LLM artifacts
+    code = _sanitize_for_render(code)
 
     print(f"[PlantUML Renderer] Rendering diagram ({len(code)} chars)...")
 
@@ -132,14 +145,21 @@ def render_diagram(plantuml_code: str) -> Optional[bytes]:
         print(f"[PlantUML Renderer] OK - Kroki rendered successfully ({len(img)} bytes)")
         return img
 
-    # Fallback to PlantUML server
+    # Fallback to PlantUML server (strict — only accept HTTP 200)
     print("[PlantUML Renderer] Kroki failed, trying PlantUML server...")
     img = _render_via_plantuml_server(code)
     if img:
         print(f"[PlantUML Renderer] OK - PlantUML server rendered ({len(img)} bytes)")
         return img
 
-    print("[PlantUML Renderer] FAIL - Both backends failed")
+    # Last resort: accept error images from PlantUML (shows error visually)
+    print("[PlantUML Renderer] Strict rendering failed, accepting error image...")
+    img = _render_via_plantuml_server(code, accept_error_image=True)
+    if img:
+        print(f"[PlantUML Renderer] OK - Returning error image ({len(img)} bytes)")
+        return img
+
+    print("[PlantUML Renderer] FAIL - All backends failed")
     return None
 
 
@@ -175,5 +195,57 @@ def _clean_plantuml(code: str) -> str:
     # If no @startuml found, wrap it
     if "@startuml" not in code:
         code = "@startuml\n" + code.strip() + "\n@enduml"
+
+    return code.strip()
+
+
+def _sanitize_for_render(code: str) -> str:
+    """
+    Final sanitization pass right before sending to rendering backends.
+    Catches common LLM artifacts that slip through the generation pipeline.
+    """
+    # Remove any remaining markdown artifacts
+    code = code.replace("```", "")
+
+    # Remove blank lines between @startuml and the first real line
+    code = re.sub(r'(@startuml)\s*\n(\s*\n)+', r'\1\n', code)
+
+    # Remove duplicate @startuml / @enduml
+    code = re.sub(r'(@startuml\s*\n?){2,}', '@startuml\n', code, flags=re.IGNORECASE)
+    code = re.sub(r'(@enduml\s*\n?){2,}', '@enduml', code, flags=re.IGNORECASE)
+
+    # Remove any text AFTER @enduml (LLM sometimes appends explanations)
+    end_idx = code.find('@enduml')
+    if end_idx != -1:
+        code = code[:end_idx + len('@enduml')]
+
+    # Remove any text BEFORE @startuml (LLM sometimes prepends explanations)
+    start_idx = code.find('@startuml')
+    if start_idx > 0:
+        code = code[start_idx:]
+
+    # Remove lines that are clearly LLM commentary (not PlantUML)
+    commentary_prefixes = (
+        'here is', "here's", 'below is', 'this diagram',
+        'note:', 'explanation:', 'the above', 'as you can see',
+        'i hope', 'let me', 'please note', 'sure,', 'certainly',
+        'the following', 'this is', 'i have',
+    )
+    lines = code.split('\n')
+    cleaned = []
+    for line in lines:
+        stripped = line.strip().lower()
+        if any(stripped.startswith(p) for p in commentary_prefixes):
+            continue
+        cleaned.append(line)
+    code = '\n'.join(cleaned)
+
+    # Remove empty skinparam blocks: skinparam word { }
+    code = re.sub(r'skinparam\s+\w+\s*\{\s*\}', '', code, flags=re.IGNORECASE)
+
+    # Fix common bad arrow syntax that LLMs produce
+    # e.g., "-->" with nothing on one side
+    code = re.sub(r'^\s*-->\s*$', '', code, flags=re.MULTILINE)
+    code = re.sub(r'^\s*<--\s*$', '', code, flags=re.MULTILINE)
 
     return code.strip()

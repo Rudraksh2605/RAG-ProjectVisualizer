@@ -42,7 +42,7 @@ def render_sidebar():
         st.markdown("---")
 
         # Show indexing stats if available
-        if rag_engine.get_project_path():
+        if st.session_state.get("active_project") and rag_engine.get_project_path() == st.session_state["active_project"]:
             stats = rag_engine.get_project_stats()
             overview = analysis.get_overview(stats)
             st.metric("Indexed Chunks", overview["total_chunks"])

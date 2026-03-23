@@ -178,7 +178,7 @@ def clear_diagram_cache():
 #  Unified generator — replaces 9 copy-paste functions
 # ═══════════════════════════════════════════════════════════════
 
-def generate_diagram(diagram_type: str, focus: Optional[str] = None, target_model: str = None) -> str:
+def generate_diagram(diagram_type: str, focus: Optional[str] = None, target_model: str = None, force: bool = False) -> str:
     """
     Generate a PlantUML diagram of the given type.
 
@@ -186,13 +186,14 @@ def generate_diagram(diagram_type: str, focus: Optional[str] = None, target_mode
         diagram_type: Key from DIAGRAM_SPECS (e.g. "class_diagram")
         focus:        Optional focus class/flow for types that support it
         target_model: Optional LLM model name. If None, uses default routing.
+        force:        If True, bypass cache and re-generate.
 
     Returns:
         Valid PlantUML code string.
     """
     # Check cache first
     key = _cache_key(diagram_type, focus, target_model)
-    if key in _diagram_cache:
+    if not force and key in _diagram_cache:
         log.info("Cache hit for %s (focus=%s)", diagram_type, focus)
         return _diagram_cache[key]
 
@@ -226,32 +227,32 @@ def generate_diagram(diagram_type: str, focus: Optional[str] = None, target_mode
 # ── Backward-compatible convenience wrappers ──────────────────
 # (so existing app.py code keeps working without changes)
 
-def generate_class_diagram(focus_class: str = None, target_model: str = None) -> str:
-    return generate_diagram("class_diagram", focus_class, target_model)
+def generate_class_diagram(focus_class: str = None, target_model: str = None, force: bool = False) -> str:
+    return generate_diagram("class_diagram", focus_class, target_model, force)
 
-def generate_sequence_diagram(focus: str = None, target_model: str = None) -> str:
-    return generate_diagram("sequence_diagram", focus, target_model)
+def generate_sequence_diagram(focus: str = None, target_model: str = None, force: bool = False) -> str:
+    return generate_diagram("sequence_diagram", focus, target_model, force)
 
-def generate_activity_diagram(target_model: str = None) -> str:
-    return generate_diagram("activity_diagram", target_model=target_model)
+def generate_activity_diagram(target_model: str = None, force: bool = False) -> str:
+    return generate_diagram("activity_diagram", target_model=target_model, force=force)
 
-def generate_state_diagram(focus_class: str = None, target_model: str = None) -> str:
-    return generate_diagram("state_diagram", focus_class, target_model)
+def generate_state_diagram(focus_class: str = None, target_model: str = None, force: bool = False) -> str:
+    return generate_diagram("state_diagram", focus_class, target_model, force)
 
-def generate_component_diagram(target_model: str = None) -> str:
-    return generate_diagram("component_diagram", target_model=target_model)
+def generate_component_diagram(target_model: str = None, force: bool = False) -> str:
+    return generate_diagram("component_diagram", target_model=target_model, force=force)
 
-def generate_usecase_diagram(target_model: str = None) -> str:
-    return generate_diagram("usecase_diagram", target_model=target_model)
+def generate_usecase_diagram(target_model: str = None, force: bool = False) -> str:
+    return generate_diagram("usecase_diagram", target_model=target_model, force=force)
 
-def generate_package_diagram(target_model: str = None) -> str:
-    return generate_diagram("package_diagram", target_model=target_model)
+def generate_package_diagram(target_model: str = None, force: bool = False) -> str:
+    return generate_diagram("package_diagram", target_model=target_model, force=force)
 
-def generate_deployment_diagram(target_model: str = None) -> str:
-    return generate_diagram("deployment_diagram", target_model=target_model)
+def generate_deployment_diagram(target_model: str = None, force: bool = False) -> str:
+    return generate_diagram("deployment_diagram", target_model=target_model, force=force)
 
-def generate_navigation_diagram(target_model: str = None) -> str:
-    return generate_diagram("navigation_diagram", target_model=target_model)
+def generate_navigation_diagram(target_model: str = None, force: bool = False) -> str:
+    return generate_diagram("navigation_diagram", target_model=target_model, force=force)
 
 
 # ── Now populate DIAGRAM_REGISTRY with actual callable functions ──
@@ -427,6 +428,12 @@ _ERROR_MARKERS = [
     "I'm sorry",
     "I apologize",
     "As an AI",
+    "The error message is",
+    "The error is",
+    "cannot be rendered",
+    "syntax error",
+    "is misleading",
+    "should be something like",
 ]
 
 # ── Type-specific keywords for validation ──────────────────────
@@ -486,19 +493,13 @@ def _extract_plantuml(text: str) -> str:
     Strategy (in order):
       1. Regex search for @startuml...@enduml blocks
       2. Extract from ```plantuml or ``` code fences
-      3. Fallback: wrap entire output
+      3. Check for error markers (only if no valid block found)
+      4. Fallback: wrap entire output
     """
     if not text or not text.strip():
         return "@startuml\n' Empty diagram\n@enduml"
 
-    # Check if the LLM returned an error message
-    text_lower = text.lower()
-    for marker in _ERROR_MARKERS:
-        if marker.lower() in text_lower:
-            log.warning("LLM returned error-like text: %s...", text[:100])
-            return "@startuml\n' LLM could not generate diagram\n@enduml"
-
-    # 1. Regex: find all @startuml...@enduml blocks
+    # 1. Regex: find all @startuml...@enduml blocks (HIGHEST PRIORITY)
     matches = _PUML_BLOCK_RE.findall(text)
     if matches:
         best = max(matches, key=len)
@@ -513,7 +514,14 @@ def _extract_plantuml(text: str) -> str:
             return max(inner, key=len).strip()
         return f"@startuml\n{body}\n@enduml"
 
-    # 3. Fallback: wrap entire output (strip common chat prefixes)
+    # 3. No @startuml block found — check if LLM returned an error/refusal
+    text_lower = text.lower()
+    for marker in _ERROR_MARKERS:
+        if marker.lower() in text_lower:
+            log.warning("LLM returned error-like text: %s...", text[:100])
+            return "@startuml\n' LLM could not generate diagram\n@enduml"
+
+    # 4. Fallback: wrap entire output (strip common chat prefixes)
     stripped = text.strip()
     for prefix in [
         "Here is", "Here's", "Below is", "The following",
@@ -831,13 +839,30 @@ def _retry_with_llm(original_code: str, error_msg: str,
     Send the broken PlantUML back to the LLM with the error message,
     asking it to produce valid syntax. Max 1 retry.
     """
+    # Number the lines so the LLM can reference line numbers from the error message
+    numbered_code = "\n".join(f"{i+1}: {line}" for i, line in enumerate(original_code.split("\n")))
+    
+    # Add diagram-specific rules if possible
+    rules = []
+    if analysis_type == "activity_diagram":
+        rules.append("For activity diagrams, ensure swimblanes are properly defined: use '|Swimlane|' and place 'start' AFTER the first swimlane.")
+    elif analysis_type == "sequence_diagram":
+        rules.append("For sequence diagrams, ensure activate/deactivate blocks are matched and participants are declared before use.")
+        
+    rules_text = ("\nRULES FOR THIS DIAGRAM TYPE:\n" + "\n".join(rules) + "\n") if rules else ""
+    
     repair_prompt = (
-        "The following PlantUML code has a syntax error and cannot be rendered.\n\n"
+        "FIX THIS PlantUML code. It has a syntax error.\n\n"
         f"ERROR: {error_msg}\n\n"
-        f"BROKEN CODE:\n{original_code}\n\n"
-        "Please fix the PlantUML syntax and output ONLY the corrected code "
-        "between @startuml and @enduml. Do NOT include any explanation text. "
-        "Output ONLY valid PlantUML code."
+        f"BROKEN CODE (with line numbers):\n{numbered_code}\n\n"
+        "INSTRUCTIONS:\n"
+        "1. Output ONLY the fixed PlantUML code between @startuml and @enduml\n"
+        "2. Do NOT include ANY text before @startuml or after @enduml\n"
+        "3. Do NOT explain what was wrong\n"
+        "4. Do NOT apologize\n"
+        "5. Do NOT include markdown fences, line numbers, or chat text.\n"
+        "6. Just output the corrected @startuml ... @enduml block\n"
+        f"{rules_text}"
     )
     target_model = getattr(config, "MODEL_ROUTING", {}).get(
         analysis_type, config.LLM_MODEL

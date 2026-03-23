@@ -1,5 +1,6 @@
 import streamlit as st
 from core import rag_engine
+from utils import history_manager
 
 def render():
     """Renders the Chat tab."""
@@ -9,9 +10,11 @@ def render():
         "and DeepSeek Coder answers based on your actual codebase."
     )
 
-    # Chat history in session state
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
+    # Project-specific Chat history in session state
+    active_proj = st.session_state.get("active_project")
+    if "chat_history" not in st.session_state or st.session_state.get("chat_active_project") != active_proj:
+        st.session_state.chat_history = history_manager.load_chat_history(active_proj)
+        st.session_state.chat_active_project = active_proj
 
     # Display history
     for msg in st.session_state.chat_history:
@@ -24,6 +27,7 @@ def render():
         st.session_state.chat_history.append(
             {"role": "user", "content": user_q}
         )
+        history_manager.save_chat_history(active_proj, st.session_state.chat_history)
         with st.chat_message("user"):
             st.markdown(user_q)
 
@@ -38,3 +42,4 @@ def render():
         st.session_state.chat_history.append(
             {"role": "assistant", "content": full_response}
         )
+        history_manager.save_chat_history(active_proj, st.session_state.chat_history)

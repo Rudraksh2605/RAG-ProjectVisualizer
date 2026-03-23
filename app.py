@@ -15,7 +15,7 @@ import streamlit as st
 
 # Must be the FIRST Streamlit call
 st.set_page_config(
-    page_title="RAG Project Visualizer",
+    page_title="Android Project Visualizer",
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -23,7 +23,7 @@ st.set_page_config(
 
 from core import rag_engine
 from ui import styles, sidebar
-from ui.tabs import overview, uml, dependencies, security, docs, chat
+from ui.tabs import overview, uml, dependencies, security, docs, chat, history
 
 # ═══════════════════════════════════════════════════════════════
 #  Initialization & Layout
@@ -34,6 +34,18 @@ styles.load_css()
 
 # Render sidebar
 project_path, analyze_btn = sidebar.render_sidebar()
+
+# ═══════════════════════════════════════════════════════════════
+#  Initialization & Session State
+# ═══════════════════════════════════════════════════════════════
+
+if "active_project" not in st.session_state:
+    st.session_state.active_project = None
+
+if "resume_project" in st.session_state:
+    project_path = st.session_state.resume_project
+    analyze_btn = True
+    del st.session_state.resume_project
 
 # ═══════════════════════════════════════════════════════════════
 #  Indexing
@@ -57,6 +69,7 @@ if analyze_btn and project_path:
         try:
             idx_stats = rag_engine.index_project(project_path, progress=_progress)
             progress_bar.progress(1.0, text="Done!")
+            st.session_state.active_project = project_path
             st.success(
                 f"Indexed **{idx_stats['chunks']}** chunks from "
                 f"**{idx_stats['parsed']}** files."
@@ -69,32 +82,25 @@ if analyze_btn and project_path:
 #  Main tabs (only shown after indexing)
 # ═══════════════════════════════════════════════════════════════
 
-if not rag_engine.get_project_path():
+if not st.session_state.active_project:
     st.markdown("## 👋 Welcome to RAG Project Visualizer")
     st.markdown(
         "Enter an Android project path in the sidebar and click "
         "**Analyze Project** to get started."
     )
-    st.markdown(
-        "This tool uses **RAG** (Retrieval-Augmented Generation) with "
-        "**DeepSeek Coder 6.7B** to analyze your codebase and generate:\n"
-        "- 📊 Dependency graphs\n"
-        "- 📐 UML class/sequence/activity/state/component/use-case/package/deployment diagrams\n"
-        "- 🛡️ Security & Code Smell scanning\n"
-        "- 📖 AI-powered documentation\n"
-        "- 💬 Interactive project Q&A\n"
-        "- ⚡ Parallel batch generation with threading"
-    )
+    st.markdown("---")
+    history.render()
     st.stop()
 
 
-tab_overview, tab_uml, tab_deps, tab_security, tab_docs, tab_chat = st.tabs([
+tab_overview, tab_uml, tab_deps, tab_security, tab_docs, tab_chat, tab_history = st.tabs([
     "📊 Overview",
-    "📐 UML Diagrams",
+    "📐 Diagrams",
     "🔗 Dependency Graph",
     "🛡️ Code Quality",
     "📖 Documentation",
     "💬 Chat",
+    "🕒 History",
 ])
 
 with tab_overview:
@@ -114,3 +120,6 @@ with tab_docs:
 
 with tab_chat:
     chat.render()
+
+with tab_history:
+    history.render()

@@ -14,14 +14,14 @@ MODEL_ROUTING = {
     "general": "qwen2.5-coder",             # Chat & explanation
     "class_diagram": "qwen2.5-coder",       # PlantUML rendering
     "sequence_diagram": "qwen2.5-coder",
-    "activity_diagram": "qwen2.5-coder",
+    "activity_diagram": "deepseek-coder",
     "dependency_graph": "qwen2.5-coder",    # Graphviz text
     "state_diagram": "qwen2.5-coder",       # New UML diagrams
     "component_diagram": "qwen2.5-coder",
-    "usecase_diagram": "qwen2.5-coder",
+    "usecase_diagram": "deepseek-coder",
     "package_diagram": "qwen2.5-coder",
     "deployment_diagram": "qwen2.5-coder",
-    "navigation_diagram": "qwen2.5-coder",
+    "navigation_diagram": "deepseek-coder",
     "doc_overview": "qwen2.5-coder",        # Documentation
     "doc_architecture": "qwen2.5-coder",
     "doc_features": "qwen2.5-coder",
@@ -46,7 +46,7 @@ MODEL_ROUTING = {
 EMBEDDING_MODEL = "nomic-embed-text"    # For vector embeddings
 
 # ── Parallel execution ─────────────────────────────────────────
-PARALLEL_MAX_WORKERS = 3                # Max concurrent LLM requests
+PARALLEL_MAX_WORKERS = 1                # Max concurrent LLM requests (1 for local Ollama to avoid timeouts)
 
 # ── Generation parameters ──────────────────────────────────────
 LLM_TEMPERATURE = 0.3

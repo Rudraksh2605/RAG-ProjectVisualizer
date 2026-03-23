@@ -56,18 +56,26 @@ def render():
         idx = models.index(default_model) if default_model in models else 0
         selected_model_single = st.selectbox("LLM Model:", models, index=idx, key="uml_single_mod")
         
-        if st.button("Confirm Generate", key="gen_single_uml_btn"):
-            st.session_state["do_gen_single_uml"] = selected_model_single
+        btn_col1, btn_col2 = st.columns(2)
+        with btn_col1:
+            if st.button("Generate", key="gen_single_uml_btn"):
+                st.session_state["do_gen_single_uml"] = selected_model_single
+                st.session_state["do_gen_single_force"] = False
+        with btn_col2:
+            if st.button("Regenerate", key="regen_single_uml_btn"):
+                st.session_state["do_gen_single_uml"] = selected_model_single
+                st.session_state["do_gen_single_force"] = True
 
     if st.session_state.get("do_gen_single_uml"):
         selected_model = st.session_state.pop("do_gen_single_uml")
+        force_gen = st.session_state.pop("do_gen_single_force", False)
         with st.spinner(f"Generating {selected_diagram} via RAG + {selected_model}…"):
             if needs_focus and focus_sel and focus_sel != "(All Classes)":
-                puml = gen_func(focus_sel, target_model=selected_model)
+                puml = gen_func(focus_sel, target_model=selected_model, force=force_gen)
             elif needs_focus:
-                puml = gen_func(None, target_model=selected_model)
+                puml = gen_func(None, target_model=selected_model, force=force_gen)
             else:
-                puml = gen_func(target_model=selected_model)
+                puml = gen_func(target_model=selected_model, force=force_gen)
 
         # Store in session state so data survives Streamlit reruns
         st.session_state["last_puml"] = puml
@@ -144,11 +152,19 @@ def render():
         if not models:
             models = [config.LLM_MODEL]
         selected_model_batch = st.selectbox("LLM Model (for all):", models, key="uml_batch_mod")
-        if st.button("Confirm Batch Generation", key="gen_batch_uml_btn"):
-            st.session_state["do_gen_batch_uml"] = selected_model_batch
+        btn_batch_col1, btn_batch_col2 = st.columns(2)
+        with btn_batch_col1:
+            if st.button("Generate Batch", key="gen_batch_uml_btn"):
+                st.session_state["do_gen_batch_uml"] = selected_model_batch
+                st.session_state["do_gen_batch_force"] = False
+        with btn_batch_col2:
+            if st.button("Regenerate Batch", key="regen_batch_uml_btn"):
+                st.session_state["do_gen_batch_uml"] = selected_model_batch
+                st.session_state["do_gen_batch_force"] = True
 
     if st.session_state.get("do_gen_batch_uml"):
         selected_model = st.session_state.pop("do_gen_batch_uml")
+        force_gen = st.session_state.pop("do_gen_batch_force", False)
         progress = st.progress(0, text=f"Starting batch generation ({selected_model})…")
 
         step_count = [0]
@@ -166,9 +182,9 @@ def render():
         for name in batch_selected:
             gen_func, needs_focus = DIAGRAM_REGISTRY[name]
             if needs_focus:
-                tasks.append((name, lambda f=gen_func: f(None, target_model=selected_model)))
+                tasks.append((name, lambda f=gen_func: f(None, target_model=selected_model, force=force_gen)))
             else:
-                tasks.append((name, lambda f=gen_func: f(target_model=selected_model)))
+                tasks.append((name, lambda f=gen_func: f(target_model=selected_model, force=force_gen)))
 
         with st.spinner(f"Generating {len(tasks)} diagrams in parallel…"):
             results = run_parallel(

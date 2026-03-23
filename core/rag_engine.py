@@ -13,6 +13,7 @@ from core import parser, embeddings, vector_store
 from core.chunker import chunk_parsed_files, CodeChunk
 from core.ollama_client import generate, generate_stream
 from utils.helpers import scan_project_files
+from utils import history_manager
 import config
 
 
@@ -125,12 +126,33 @@ def index_project(project_path: str,
         "chunks": len(_chunks),
         "indexed": True,
     }
+    
+    # 7. Add to persistent history
+    history_manager.add_project_history(project_path, stats)
+    
     if progress:
         progress(f"✅ Indexed {stats['chunks']} chunks from {stats['parsed']} files.")
     return stats
 
 
 # ── Retrieval + Generation ─────────────────────────────────────
+
+def expand_query(question: str, target_model: str) -> str:
+    """Uses the LLM to expand the query with related technical terms."""
+    try:
+        from core.ollama_client import generate
+        prompt = (
+            "Given the following question about an Android codebase, provide 3 alternative "
+            "search queries using different technical synonyms or related concepts to help "
+            "with vector similarity search. List them on separate lines.\n\n"
+            f"Question: {question}\n\nSearch Queries:"
+        )
+        variations = generate(prompt, model=target_model)
+        # Combine original + variations (embeddings model handles max length)
+        return f"{question}\n{variations}"
+    except Exception as e:
+        return question
+
 
 def query(question: str,
           analysis_type: str = "general",
@@ -140,10 +162,15 @@ def query(question: str,
           target_model: str = None) -> str:
     """
     End-to-end RAG query:
-      embed question → retrieve → build prompt → generate answer.
+      expand query → embed → retrieve → build prompt → generate answer.
     """
-    # Embed the question
-    q_emb = embeddings.embed_text(question)
+    if target_model is None:
+        target_model = getattr(config, "MODEL_ROUTING", {}).get(analysis_type, config.LLM_MODEL)
+
+    expanded_question = expand_query(question, target_model)
+    
+    # Embed the expanded question
+    q_emb = embeddings.embed_text(expanded_question)
 
     # Build optional metadata filter
     where = {}
@@ -160,9 +187,6 @@ def query(question: str,
 
     context_blocks = _format_retrieved_context(results)
     
-    # ── Multi-Model Routing ──
-    if target_model is None:
-        target_model = getattr(config, "MODEL_ROUTING", {}).get(analysis_type, config.LLM_MODEL)
     prompt = _build_prompt(question, context_blocks, analysis_type, target_model)
     
     print(f"\n[LLM Router] Routing '{analysis_type}' task to model: {target_model}")
@@ -179,7 +203,12 @@ def query_stream(question: str,
     """
     Streaming version — yields tokens for the Streamlit chat UI.
     """
-    q_emb = embeddings.embed_text(question)
+    if target_model is None:
+        target_model = getattr(config, "MODEL_ROUTING", {}).get(analysis_type, config.LLM_MODEL)
+
+    expanded_question = expand_query(question, target_model)
+
+    q_emb = embeddings.embed_text(expanded_question)
 
     where = {}
     if layer_filter:
@@ -195,9 +224,6 @@ def query_stream(question: str,
 
     context_blocks = _format_retrieved_context(results)
 
-    # ── Multi-Model Routing ──
-    if target_model is None:
-        target_model = getattr(config, "MODEL_ROUTING", {}).get(analysis_type, config.LLM_MODEL)
     prompt = _build_prompt(question, context_blocks, analysis_type, target_model)
     print(f"\n[LLM Router] Routing stream '{analysis_type}' task to model: {target_model}")
 
@@ -220,10 +246,11 @@ _ANALYSIS_INSTRUCTIONS = {
     "general": "Answer the question based on the code context provided.",
     "class_diagram": (
         "Generate a CLEAN, READABLE PlantUML class diagram from the code context.\n\n"
-        "BEFORE GENERATING: Carefully read ALL code context. Identify the most important classes, "
-        "their fields, methods, and how they relate to each other.\n\n"
+        "BEFORE GENERATING: Inside a <thinking> block, think step-by-step. Analyze the most important classes, "
+        "their fields, methods, and how they relate to each other BEFORE outputting code.\n\n"
         "RULES:\n"
         "- Add a title: title \"Class Diagram — [ProjectName]\"\n"
+        "- Keep syntax strict and simple. Do NOT use special characters in class names.\n"
         "- Show only 4-6 MOST IMPORTANT classes (core domain, not helpers/utilities)\n"
         "- For each class show ONLY: 2-3 key fields, 2-4 public methods (skip getters/setters/toString)\n"
         "- Use visibility: + public, # protected, - private\n"
@@ -241,8 +268,8 @@ _ANALYSIS_INSTRUCTIONS = {
     ),
     "sequence_diagram": (
         "Generate a CLEAN, READABLE PlantUML sequence diagram from the code context.\n\n"
-        "BEFORE GENERATING: Carefully read ALL code context. Trace ONE complete user interaction "
-        "flow from start to finish.\n\n"
+        "BEFORE GENERATING: Inside a <thinking> block, think step-by-step. Trace ONE complete user interaction "
+        "flow from start to finish BEFORE outputting code.\n\n"
         "GOAL: Show ONE clear user interaction flow that someone can follow step-by-step.\n\n"
         "RULES:\n"
         "- Add a title: title \"Sequence — [Flow Name]\"\n"
@@ -273,8 +300,8 @@ _ANALYSIS_INSTRUCTIONS = {
         "- Use fork/join only if there's actual parallel behavior\n"
         "- Add 'note right : ...' for important business rules\n"
         "- Keep the total flow to 8-12 steps max\n\n"
-        "DO NOT: Include any explanation text outside @startuml/@enduml.\n"
         "DO NOT: Show more than one flow — pick the most important one.\n"
+        "DO NOT: Include any explanation text between <thinking> and @startuml. Go straight to @startuml after thinking.\n"
         "DO NOT: Include any skinparam or styling — styling is handled automatically.\n"
     ),
     "dependency_graph": (
@@ -375,6 +402,7 @@ _ANALYSIS_INSTRUCTIONS = {
         "GOAL: Show what the app lets users do, so someone understands its features at a glance.\n\n"
         "RULES:\n"
         "- Add a title: title \"Use Cases — [AppName]\"\n"
+        "- YOU MUST USE the 'usecase' keyword to define features and 'actor' keyword for users. This is strictly required.\n"
         "- Use 'left to right direction' for better layout\n"
         "- Define 1-2 actors: actor \"User\" as U\n"
         "- Wrap ALL use cases inside a rectangle: rectangle \"AppName\" { }\n"
