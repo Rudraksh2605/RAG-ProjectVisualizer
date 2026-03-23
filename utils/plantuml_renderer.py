@@ -124,13 +124,17 @@ def _render_via_plantuml_server(plantuml_code: str, accept_error_image: bool = F
 #  Public API
 # ═══════════════════════════════════════════════════════════════
 
-def render_diagram(plantuml_code: str) -> Optional[bytes]:
+def render_diagram(plantuml_code: str, debug: bool = False) -> Optional[bytes]:
     """
     Render PlantUML code to PNG bytes.
+
     Tries Kroki first, falls back to the PlantUML server.
-    As a last resort, accepts PlantUML error images so users can
-    at least see what went wrong.
-    Returns PNG bytes, or None on failure.
+    Error images (HTTP 400 with syntax-error PNG) are NOT treated as
+    success — they return None so the UI can display a proper error.
+
+    Set debug=True to accept error images for diagnostic purposes only.
+
+    Returns PNG bytes on success, or None on failure.
     """
     # Clean up: ensure we only have the @startuml...@enduml block
     code = _clean_plantuml(plantuml_code)
@@ -152,14 +156,15 @@ def render_diagram(plantuml_code: str) -> Optional[bytes]:
         print(f"[PlantUML Renderer] OK - PlantUML server rendered ({len(img)} bytes)")
         return img
 
-    # Last resort: accept error images from PlantUML (shows error visually)
-    print("[PlantUML Renderer] Strict rendering failed, accepting error image...")
-    img = _render_via_plantuml_server(code, accept_error_image=True)
-    if img:
-        print(f"[PlantUML Renderer] OK - Returning error image ({len(img)} bytes)")
-        return img
+    # Debug mode only: accept error images for diagnostics
+    if debug:
+        print("[PlantUML Renderer] Debug mode: accepting error image...")
+        img = _render_via_plantuml_server(code, accept_error_image=True)
+        if img:
+            print(f"[PlantUML Renderer] DEBUG - Returning error image ({len(img)} bytes)")
+            return img
 
-    print("[PlantUML Renderer] FAIL - All backends failed")
+    print("[PlantUML Renderer] FAIL - All backends failed (syntax error in PlantUML)")
     return None
 
 
