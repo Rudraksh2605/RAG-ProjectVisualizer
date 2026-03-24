@@ -9,9 +9,12 @@ Performance features:
   - Parallel fallback for older Ollama versions
 """
 
+import logging
 import requests
 from typing import List, Optional
 import config
+
+log = logging.getLogger("embeddings")
 
 # ── Module-level state (resolved once, reused) ─────────────────
 _resolved_model: Optional[str] = None
@@ -45,33 +48,43 @@ def _resolve_embedding_model() -> str:
             for m in models:
                 if "nomic-embed-text" in m:
                     _resolved_model = m
-                    print(f"[Embeddings] Using model: {m}")
+                    log.info("Using dedicated embedding model: %s", m)
                     return m
 
             # Fallback: any model with "embed" in name
             for m in models:
                 if "embed" in m.lower():
                     _resolved_model = m
-                    print(f"[Embeddings] Using model: {m}")
+                    log.info("Using embedding model: %s", m)
                     return m
 
             # Last resort: use the LLM model itself (deepseek-coder)
             for m in models:
-                if "deepseek" in m.lower() or "coder" in m.lower():
+                if "deepseek" in m.lower() or "coder" in m.lower() or "qwen" in m.lower():
                     _resolved_model = m
-                    print(f"[Embeddings] Fallback to LLM model for embeddings: {m}")
+                    log.warning(
+                        "No dedicated embedding model found! Falling back to LLM "
+                        "model '%s' for embeddings. Retrieval quality will be "
+                        "DEGRADED. Run 'ollama pull nomic-embed-text' for better results.",
+                        m,
+                    )
                     return m
 
             # Use whatever is first
             if models:
                 _resolved_model = models[0]
-                print(f"[Embeddings] Using first available model: {models[0]}")
+                log.warning(
+                    "No embedding model found. Using first available model '%s'. "
+                    "Retrieval quality may be degraded.",
+                    models[0],
+                )
                 return models[0]
     except Exception:
         pass
 
     # Default from config
     _resolved_model = config.EMBEDDING_MODEL
+    log.info("Using default embedding model from config: %s", _resolved_model)
     return _resolved_model
 
 
@@ -196,5 +209,17 @@ def is_embedding_model_available() -> bool:
     try:
         model = _resolve_embedding_model()
         return model is not None
+    except Exception:
+        return False
+
+
+def is_dedicated_embedding_model() -> bool:
+    """
+    Return True only if the resolved model is a real embedding model
+    (contains 'embed' in its name), not a coder/LLM fallback.
+    """
+    try:
+        model = _resolve_embedding_model()
+        return model is not None and "embed" in model.lower()
     except Exception:
         return False

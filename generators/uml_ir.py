@@ -127,6 +127,7 @@ class ClassIR:
 class ClassDiagramIR:
     title: str = ""
     classes: List[ClassIR] = field(default_factory=list)
+    external_classes: List[ClassIR] = field(default_factory=list)
     relationships: List[Relationship] = field(default_factory=list)
     notes: List[Note] = field(default_factory=list)
 
@@ -135,6 +136,7 @@ class ClassDiagramIR:
         return ClassDiagramIR(
             title=str(d.get("title", "")),
             classes=[ClassIR.from_dict(c) for c in d.get("classes", [])],
+            external_classes=[ClassIR.from_dict(c) for c in d.get("external_classes", [])],
             relationships=[Relationship.from_dict(r) for r in d.get("relationships", [])],
             notes=[Note.from_dict(n) for n in d.get("notes", [])],
         )
@@ -418,6 +420,7 @@ class InterfaceIR:
 class ComponentDiagramIR:
     title: str = ""
     components: List[ComponentIR] = field(default_factory=list)
+    external_components: List[ComponentIR] = field(default_factory=list)
     interfaces: List[InterfaceIR] = field(default_factory=list)
     relationships: List[Relationship] = field(default_factory=list)
     notes: List[Note] = field(default_factory=list)
@@ -427,6 +430,7 @@ class ComponentDiagramIR:
         return ComponentDiagramIR(
             title=str(d.get("title", "")),
             components=[ComponentIR.from_dict(c) for c in d.get("components", [])],
+            external_components=[ComponentIR.from_dict(c) for c in d.get("external_components", [])],
             interfaces=[InterfaceIR.from_dict(i) for i in d.get("interfaces", [])],
             relationships=[Relationship.from_dict(r) for r in d.get("relationships", [])],
             notes=[Note.from_dict(n) for n in d.get("notes", [])],
@@ -472,10 +476,27 @@ class PackageDiagramIR:
 # ═══════════════════════════════════════════════════════════════
 
 @dataclass
+class DeploymentChildIR:
+    """A child artifact/component inside a deployment node."""
+    name: str
+    child_type: str = "artifact"  # artifact, component, database
+
+    @staticmethod
+    def from_dict(d) -> "DeploymentChildIR":
+        if isinstance(d, str):
+            # Backward compat: plain string → artifact
+            return DeploymentChildIR(name=d, child_type="artifact")
+        return DeploymentChildIR(
+            name=str(d.get("name", "")),
+            child_type=str(d.get("child_type", "artifact")),
+        )
+
+
+@dataclass
 class DeploymentNodeIR:
     name: str
     node_type: str = "node"  # node, database, cloud, artifact
-    children: List[str] = field(default_factory=list)
+    children: List[DeploymentChildIR] = field(default_factory=list)
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "DeploymentNodeIR":
@@ -485,7 +506,7 @@ class DeploymentNodeIR:
         return DeploymentNodeIR(
             name=str(d.get("name", "")),
             node_type=ntype,
-            children=list(d.get("children", [])),
+            children=[DeploymentChildIR.from_dict(c) for c in d.get("children", [])],
         )
 
 

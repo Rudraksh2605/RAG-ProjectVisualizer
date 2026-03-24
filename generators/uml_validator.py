@@ -70,6 +70,10 @@ def validate_class_diagram(ir: ClassDiagramIR) -> ValidationResult:
             errors.append(f"Duplicate class: '{cls.name}'")
         declared.add(cls.name)
 
+    # Include external classes (promoted by normalizer) in declared set
+    for cls in ir.external_classes:
+        declared.add(cls.name)
+
     for rel in ir.relationships:
         _check_non_empty(rel.source, "relationship.source", errors)
         _check_non_empty(rel.target, "relationship.target", errors)
@@ -225,6 +229,10 @@ def validate_component_diagram(ir: ComponentDiagramIR) -> ValidationResult:
         if iface.alias:
             declared.add(iface.alias)
 
+    # Include external components (promoted by normalizer)
+    for c in ir.external_components:
+        declared.add(c.name)
+
     _check_no_duplicates(ir.components, lambda c: c.name, "component", errors)
 
     for rel in ir.relationships:
@@ -264,7 +272,8 @@ def validate_deployment_diagram(ir: DeploymentDiagramIR) -> ValidationResult:
         _check_non_empty(n.name, "node.name", errors)
         declared.add(n.name)
         for child in n.children:
-            declared.add(child)
+            if child.name:
+                declared.add(child.name)
 
     for rel in ir.relationships:
         if rel.source and rel.source not in declared:

@@ -28,10 +28,16 @@ IR_SCHEMAS = {
       ]
     }
   ],
+  "external_classes": [
+    {
+      "name": "string — external collaborator not defined in the project (e.g. FirebaseAuth, Retrofit)",
+      "stereotype": "External"
+    }
+  ],
   "relationships": [
     {
-      "source": "string — MUST match a class name above",
-      "target": "string — MUST match a class name above",
+      "source": "string — MUST match a class name or external_class name",
+      "target": "string — MUST match a class name or external_class name",
       "label": "string — verb describing the relationship",
       "arrow_type": "-->|..|>|*--|--|<|--"
     }
@@ -67,16 +73,16 @@ IR_SCHEMAS = {
   "title": "string — diagram title describing the flow",
   "participants": [
     {
-      "name": "string — class/component name",
-      "alias": "string — optional short alias",
+      "name": "string — full class/component name (e.g. LoginActivity, not LA)",
+      "alias": "string — optional, metadata only, do NOT use in messages",
       "stereotype": "string — e.g. Activity, Service (optional)",
       "participant_type": "participant|actor|database|entity"
     }
   ],
   "messages": [
     {
-      "sender": "string — MUST match a participant name above",
-      "receiver": "string — MUST match a participant name above",
+      "sender": "string — MUST exactly match a participant NAME (not alias)",
+      "receiver": "string — MUST exactly match a participant NAME (not alias)",
       "label": "string — numbered message e.g. '1. loginUser(email, pwd)'",
       "is_return": false,
       "activate": false,
@@ -87,9 +93,9 @@ IR_SCHEMAS = {
     {
       "group_type": "alt|opt|loop",
       "label": "string — condition label",
-      "messages": [same format as messages above],
+      "messages": ["same format as messages above — sender/receiver MUST match participant names"],
       "else_label": "string — else condition (optional)",
-      "else_messages": [same format as messages above]
+      "else_messages": ["same format as messages above"]
     }
   ],
   "notes": [
@@ -106,8 +112,8 @@ IR_SCHEMAS = {
       "label": "string — action description or empty for stop",
       "swimlane": "string — which swimlane this step belongs to (optional)",
       "condition": "string — for decisions only",
-      "yes_steps": [nested steps for yes branch],
-      "no_steps": [nested steps for no branch]
+      "yes_steps": ["nested steps for yes branch"],
+      "no_steps": ["nested steps for no branch"]
     }
   ],
   "notes": [
@@ -148,13 +154,19 @@ IR_SCHEMAS = {
       "package": "string — feature group (optional)"
     }
   ],
+  "external_components": [
+    {
+      "name": "string — external library/framework component not in the project",
+      "stereotype": "External"
+    }
+  ],
   "interfaces": [
     {"name": "string — interface name", "alias": "string — optional"}
   ],
   "relationships": [
     {
-      "source": "string — MUST match a component or interface name above",
-      "target": "string — MUST match a component or interface name above",
+      "source": "string — MUST match a component, external_component, or interface name",
+      "target": "string — MUST match a component, external_component, or interface name",
       "label": "string — interaction type",
       "arrow_type": "-->|..>"
     }
@@ -191,19 +203,24 @@ IR_SCHEMAS = {
     {
       "name": "string — node name e.g. 'Android Device', 'Firebase'",
       "node_type": "node|database|cloud|artifact",
-      "children": ["string — sub-components hosted on this node"]
+      "children": [
+        {
+          "name": "string — child artifact/component name",
+          "child_type": "artifact|component|database"
+        }
+      ]
     }
   ],
   "relationships": [
     {
-      "source": "string — MUST match a node name above",
-      "target": "string — MUST match a node name above",
+      "source": "string — MUST match a node name OR a child name above",
+      "target": "string — MUST match a node name OR a child name above",
       "label": "string — protocol e.g. 'HTTPS', 'REST API'",
       "arrow_type": "-->"
     }
   ],
   "notes": [
-    {"target": "string — node name", "position": "right|left", "text": "string"}
+    {"target": "string — node or child name", "position": "right|left", "text": "string"}
   ]
 }""",
 
@@ -211,8 +228,8 @@ IR_SCHEMAS = {
   "title": "string — diagram title",
   "screens": [
     {
-      "name": "string — screen identifier (no spaces, e.g. LoginScreen)",
-      "display_name": "string — human-readable name e.g. 'Login Screen'"
+      "name": "string — screen identifier matching Activity/Fragment class name (e.g. LoginActivity)",
+      "display_name": "string — human-readable name e.g. 'Login'"
     }
   ],
   "entry_screen": "string — name of the launcher/first screen",
@@ -243,7 +260,9 @@ IR_TASK_INSTRUCTIONS = {
         "stereotype (Activity/ViewModel/Repository/Entity/Service), package/layer, "
         "2-3 key fields, and 2-4 public methods (skip getters/setters). "
         "Include relationships showing inheritance (--|>), implementation (..|>), "
-        "composition (*--), and dependency (..>). Label every relationship with a verb."
+        "composition (*--), and dependency (..>). Label every relationship with a verb. "
+        "If a relationship endpoint is a library/framework class not in the project "
+        "(e.g. FirebaseAuth, Retrofit), list it under external_classes."
     ),
     "usecase_diagram": (
         "Identify the distinct business features and user capabilities in this app. "
@@ -255,7 +274,10 @@ IR_TASK_INSTRUCTIONS = {
         "Trace ONE complete user interaction flow (e.g. login, main feature) from "
         "start to finish. Use at most 4-5 participants. Number each message for "
         "readability. Show ONE request-response round-trip. Use groups (alt/opt) "
-        "for ONE key decision point."
+        "for ONE key decision point. "
+        "CRITICAL: sender and receiver in messages MUST be the FULL participant name "
+        "(e.g. 'LoginActivity', not 'LA'). Do NOT use aliases or abbreviations in "
+        "sender/receiver fields. Aliases are optional metadata only."
     ),
     "activity_diagram": (
         "Show ONE primary user flow from app launch to the main feature. "
@@ -270,7 +292,9 @@ IR_TASK_INSTRUCTIONS = {
     "component_diagram": (
         "Show how the app's major components connect. Group into 2-4 feature "
         "packages. Add stereotypes (Activity/Service/Repository). Label every "
-        "connection with the interaction type. Limit to 6-10 components."
+        "connection with the interaction type. Limit to 6-10 components. "
+        "If a relationship references a library/framework component not in the project, "
+        "list it under external_components."
     ),
     "package_diagram": (
         "Show the 3-4 architectural layers with 2-3 key classes in each. "
@@ -279,12 +303,16 @@ IR_TASK_INSTRUCTIONS = {
     "deployment_diagram": (
         "Show where the app runs and what external services it connects to. "
         "Include the Android device, servers, databases, and cloud services. "
-        "Label connections with protocol. Limit to 4-6 nodes."
+        "Label connections with protocol. Limit to 4-6 nodes. "
+        "Children inside nodes should be structured with name and child_type. "
+        "Relationships may target either node names or child names."
     ),
     "navigation_diagram": (
-        "Map EVERY Activity and Fragment to a screen. Show how users navigate "
-        "between them. Include the launcher (entry) screen and exit points. "
-        "Label every transition with the user action that triggers it. "
-        "Show ALL screens from the code."
+        "Map the app's navigation flow. Screens will be auto-detected from the "
+        "codebase (Activities and Fragments). Your job is to define the transitions "
+        "between screens, user actions that trigger them, and the entry/exit screens. "
+        "Use the EXACT Activity/Fragment class names from the code as screen names. "
+        "Include the launcher (entry) screen and exit points. "
+        "Label every transition with the user action that triggers it."
     ),
 }

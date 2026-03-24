@@ -29,8 +29,12 @@ _LEAK_TOKENS = re.compile(r'<\|im_start\|>|<\|im_end\|>|<\|EOT\|>|<\|endoftext\|
 
 
 def _clean_response(text: str) -> str:
-    """Strip leaked special tokens from model output."""
-    cleaned = _LEAK_TOKENS.sub('', text)
+    """Strip leaked special tokens and <think> blocks from model output."""
+    # Remove <think>...</think> blocks (deepseek-coder, qwen2.5-coder)
+    cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    # Handle unclosed <think> (model hit token limit mid-thought)
+    cleaned = re.sub(r'<think>.*', '', cleaned, flags=re.DOTALL)
+    cleaned = _LEAK_TOKENS.sub('', cleaned)
     # Collapse runs of whitespace that remain after stripping
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
     return cleaned.strip()
@@ -55,10 +59,14 @@ def generate(prompt: str,
              model: str = None,
              temperature: float = None,
              max_tokens: int = None,
-             context_size: int = None) -> str:
+             context_size: int = None,
+             format_json: bool = False) -> str:
     """
     Synchronous text generation via Ollama /api/generate.
     Returns the full response string.
+
+    If format_json=True, forces Ollama to produce valid JSON output
+    by setting the 'format' parameter in the API request.
     """
     model = model or config.LLM_MODEL
     body = {
@@ -74,6 +82,8 @@ def generate(prompt: str,
             "num_ctx": context_size or config.LLM_CONTEXT_SIZE,
         },
     }
+    if format_json:
+        body["format"] = "json"
     try:
         s = _get_session()
         r = s.post(

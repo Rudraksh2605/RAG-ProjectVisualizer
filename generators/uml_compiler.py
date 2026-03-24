@@ -24,9 +24,9 @@ from generators.uml_ir import (
     SequenceDiagramIR, MessageIR, GroupIR,
     ActivityDiagramIR, ActivityStepIR,
     StateDiagramIR,
-    ComponentDiagramIR,
+    ComponentDiagramIR, ComponentIR,
     PackageDiagramIR,
-    DeploymentDiagramIR,
+    DeploymentDiagramIR, DeploymentChildIR,
     NavigationDiagramIR,
 )
 
@@ -144,6 +144,18 @@ def compile_class_diagram(ir: ClassDiagramIR) -> str:
     # Emit unpackaged classes
     for cls in no_pkg_classes:
         lines.extend(_emit_class(cls))
+        lines.append("")
+
+    # Emit external class stubs (promoted by normalizer)
+    if ir.external_classes:
+        lines.append("' -- External collaborators --")
+        for ext in ir.external_classes:
+            ename = _sanitize_name(ext.name)
+            if ename not in declared_names:
+                declared_names.add(ename)
+                alias_map[ext.name] = ename
+                stereo = ext.stereotype or "External"
+                lines.append(f'class {_quote(ename)} <<{_sanitize_name(stereo)}>>')
         lines.append("")
 
     # Emit relationships — only between declared entities
@@ -538,6 +550,19 @@ def compile_component_diagram(ir: ComponentDiagramIR) -> str:
     for comp in no_pkg:
         _emit_component(comp)
 
+    # Emit external component stubs (promoted by normalizer)
+    if ir.external_components:
+        lines.append("")
+        lines.append("' -- External components --")
+        for ext in ir.external_components:
+            nonlocal_name = _sanitize_name(ext.name)
+            ext_alias = f"COMP{counter}"
+            counter += 1
+            declared.add(ext_alias)
+            alias_map[ext.name] = ext_alias
+            stereo = ext.stereotype or "External"
+            lines.append(f'[{nonlocal_name}] as {ext_alias} <<{_sanitize_name(stereo)}>>')
+
     lines.append("")
 
     # Relationships
@@ -617,6 +642,7 @@ def compile_deployment_diagram(ir: DeploymentDiagramIR) -> str:
     lines.append("")
 
     alias_map: dict = {}
+    child_counter = 1
 
     for i, node in enumerate(ir.nodes, 1):
         nname = _sanitize_name(node.name)
@@ -624,13 +650,16 @@ def compile_deployment_diagram(ir: DeploymentDiagramIR) -> str:
         alias_map[node.name] = alias
         ntype = node.node_type
         lines.append(f'{ntype} {_quote(nname)} as {alias} {{')
-        for child_name in node.children[:5]:
-            cname = _sanitize_name(child_name)
-            lines.append(f'  [{cname}]')
+        for child in node.children[:5]:
+            cname = _sanitize_name(child.name)
+            child_alias = f"CH{child_counter}"
+            child_counter += 1
+            alias_map[child.name] = child_alias
+            lines.append(f'  [{cname}] as {child_alias}')
         lines.append("}")
         lines.append("")
 
-    # Relationships
+    # Relationships — resolve via alias_map (nodes and children)
     for rel in ir.relationships:
         src = alias_map.get(rel.source, _sanitize_name(rel.source))
         tgt = alias_map.get(rel.target, _sanitize_name(rel.target))

@@ -24,6 +24,7 @@ from core.ollama_client import generate
 from generators.uml_ir import parse_ir, IR_CLASSES
 from generators.uml_compiler import compile_ir
 from generators.uml_validator import validate_ir, validate_compiled_plantuml
+from generators.uml_normalizer import normalize_ir
 from generators.uml_prompts import IR_SCHEMAS, IR_TASK_INSTRUCTIONS
 import config
 
@@ -276,8 +277,9 @@ def _build_ir_prompt(question: str, context: str, diagram_type: str,
         "- Do NOT wrap the JSON in markdown fences (no ```).\n"
         "- Do NOT include any text before or after the JSON.\n"
         "- Do NOT add keys not in the schema.\n"
-        "- Every name in 'relationships' or 'transitions' MUST exactly match "
-        "a declared entity name.\n"
+        "- Relationship endpoints should match declared entity names when possible.\n"
+        "- External collaborators (libraries, frameworks) may be listed in the "
+        "external_classes or external_components array if the schema supports it.\n"
         "- Use only ASCII characters in names and identifiers.\n\n"
         f"REQUIRED JSON SCHEMA:\n{schema}\n\n"
         f"RETRIEVED CODE CONTEXT:\n{'=' * 60}\n{context}\n{'=' * 60}\n\n"
@@ -312,12 +314,18 @@ def _extract_json(raw_text: str) -> Optional[dict]:
     """
     Extract a JSON object from LLM output.
 
-    Handles common LLM quirks: markdown fences, trailing text, etc.
+    Handles common LLM quirks: markdown fences, <think> blocks, trailing text.
     """
     if not raw_text or not raw_text.strip():
         return None
 
     text = raw_text.strip()
+
+    # Strip <think>...</think> blocks (deepseek-coder, qwen2.5-coder)
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    # Also handle unclosed <think> (model hit token limit mid-thought)
+    text = re.sub(r'<think>.*', '', text, flags=re.DOTALL)
+    text = text.strip()
 
     # Remove markdown fences if present
     text = re.sub(r'^```(?:json)?\s*\n?', '', text)
@@ -327,6 +335,7 @@ def _extract_json(raw_text: str) -> Optional[dict]:
     # Remove any text before the first {
     brace_idx = text.find('{')
     if brace_idx == -1:
+        log.warning("No '{' found in LLM output after stripping think/fences")
         return None
     text = text[brace_idx:]
 
@@ -346,8 +355,13 @@ def _extract_json(raw_text: str) -> Optional[dict]:
         try:
             return json.loads(fixed)
         except json.JSONDecodeError:
-            log.warning("JSON still invalid after trailing-comma fix")
-            return None
+            # Try removing single-line comments (// ...)
+            fixed2 = re.sub(r'//[^\n]*', '', fixed)
+            try:
+                return json.loads(fixed2)
+            except json.JSONDecodeError:
+                log.warning("JSON still invalid after all fixup attempts")
+                return None
 
 
 def _generate_via_ir(diagram_type: str, question: str,
@@ -385,13 +399,16 @@ def _generate_via_ir(diagram_type: str, question: str,
 
     log.info("[IR Pipeline] Generating %s via %s", diagram_type, target_model)
 
-    # Step 3: Generate with lower temperature
+    # Step 3: Generate with lower temperature + JSON format mode
     raw = generate(
         prompt,
         model=target_model,
         temperature=_UML_TEMPERATURE,
         max_tokens=_UML_MAX_TOKENS,
+        format_json=True,
     )
+
+    log.info("[IR Pipeline] Raw LLM output (first 500 chars): %.500s", raw)
 
     # Step 4: Extract → Parse → Validate → Compile (with retries)
     last_errors: List[str] = []
@@ -401,7 +418,7 @@ def _generate_via_ir(diagram_type: str, question: str,
         data = _extract_json(raw)
         if data is None:
             last_errors = ["Failed to extract valid JSON from LLM output"]
-            log.warning("[IR Pipeline] JSON extraction failed (attempt %d)", attempt + 1)
+            log.warning("[IR Pipeline] JSON extraction failed (attempt %d). Raw (first 300 chars): %.300s", attempt + 1, raw)
             if attempt < MAX_IR_RETRIES - 1:
                 retry_prompt = _build_ir_retry_prompt(
                     raw[:2000], last_errors, diagram_type
@@ -409,6 +426,7 @@ def _generate_via_ir(diagram_type: str, question: str,
                 raw = generate(
                     retry_prompt, model=target_model,
                     temperature=_UML_TEMPERATURE, max_tokens=_UML_MAX_TOKENS,
+                    format_json=True,
                 )
                 continue
             break
@@ -429,6 +447,14 @@ def _generate_via_ir(diagram_type: str, question: str,
                 )
                 continue
             break
+
+        # Normalize IR (deterministic transformations before validation)
+        try:
+            parsed_data = rag_engine.get_parsed_files()
+            ir = normalize_ir(diagram_type, ir, parsed_data)
+        except Exception as e:
+            log.warning("[IR Pipeline] Normalization failed (attempt %d): %s", attempt + 1, e)
+            # Non-fatal: proceed with un-normalized IR
 
         # Validate IR
         is_valid, ir_errors = validate_ir(diagram_type, ir)
