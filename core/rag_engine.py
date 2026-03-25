@@ -7,8 +7,11 @@ Workflow:
 """
 
 import hashlib
+import re
+import threading
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Dict, Optional, Callable
+from typing import List, Dict, Optional, Callable, Any
 from core import parser, embeddings, vector_store
 from core.chunker import chunk_parsed_files, CodeChunk
 from core.ollama_client import generate, generate_stream
@@ -22,6 +25,10 @@ _parsed_files: List[Dict] = []
 _chunks: List[CodeChunk] = []
 _project_path: Optional[str] = None
 _project_fingerprint: Optional[str] = None
+_query_expansion_cache: "OrderedDict[Any, str]" = OrderedDict()
+_query_embedding_cache: "OrderedDict[str, List[float]]" = OrderedDict()
+_retrieval_cache: "OrderedDict[Any, str]" = OrderedDict()
+_cache_lock = threading.RLock()
 
 
 def get_parsed_files() -> List[Dict]:
@@ -34,6 +41,30 @@ def get_chunks() -> List[CodeChunk]:
 
 def get_project_path() -> Optional[str]:
     return _project_path
+
+
+def _cache_get(cache: OrderedDict, key: Any):
+    with _cache_lock:
+        value = cache.get(key)
+        if value is not None:
+            cache.move_to_end(key)
+        return value
+
+
+def _cache_put(cache: OrderedDict, key: Any, value: Any, max_entries: int):
+    with _cache_lock:
+        cache[key] = value
+        cache.move_to_end(key)
+        while len(cache) > max_entries:
+            cache.popitem(last=False)
+
+
+def clear_runtime_caches():
+    """Clear query-time caches after re-indexing or large config changes."""
+    with _cache_lock:
+        _query_expansion_cache.clear()
+        _query_embedding_cache.clear()
+        _retrieval_cache.clear()
 
 
 # ── Fingerprinting (skip re-indexing unchanged projects) ───────
@@ -119,6 +150,7 @@ def index_project(project_path: str,
 
     # 6. Save fingerprint for future skip-check
     _project_fingerprint = new_fp
+    clear_runtime_caches()
 
     stats = {
         "files": len(file_list),
@@ -137,42 +169,181 @@ def index_project(project_path: str,
 
 # ── Retrieval + Generation ─────────────────────────────────────
 
-def expand_query(question: str, target_model: str) -> str:
-    """Uses the LLM to expand the query with related technical terms."""
-    try:
-        from core.ollama_client import generate
-        prompt = (
-            "Given the following question about an Android codebase, provide 3 alternative "
-            "search queries using different technical synonyms or related concepts to help "
-            "with vector similarity search. List them on separate lines.\n\n"
-            f"Question: {question}\n\nSearch Queries:"
-        )
-        variations = generate(prompt, model=target_model)
-        # Combine original + variations (embeddings model handles max length)
-        return f"{question}\n{variations}"
-    except Exception as e:
+_FAST_QUERY_HINTS = {
+    "class_diagram": [
+        "class", "field", "method", "relationship", "inheritance",
+        "composition", "repository", "viewmodel", "entity",
+    ],
+    "sequence_diagram": [
+        "sequence", "interaction", "request", "response", "call chain",
+        "participant", "service", "repository", "callback",
+    ],
+    "activity_diagram": [
+        "activity flow", "user journey", "decision", "screen flow",
+        "backend step", "validation", "branch",
+    ],
+    "state_diagram": [
+        "state", "transition", "lifecycle", "event", "guard",
+        "resume", "pause", "loading", "error",
+    ],
+    "component_diagram": [
+        "component", "module", "service", "repository", "api client",
+        "dependency", "feature package", "integration",
+    ],
+    "usecase_diagram": [
+        "use case", "user action", "actor", "feature", "business capability",
+        "user flow", "system interaction",
+    ],
+    "package_diagram": [
+        "package", "layer", "module", "dependency", "presentation",
+        "business logic", "data layer",
+    ],
+    "deployment_diagram": [
+        "deployment", "server", "cloud", "database", "api",
+        "protocol", "android device", "service integration",
+    ],
+    "navigation_diagram": [
+        "navigation", "screen", "activity", "fragment", "intent",
+        "startActivity", "NavController", "fragment transaction",
+        "destination", "back stack",
+    ],
+    "dependency_graph": [
+        "dependency graph", "imports", "module dependency", "layer dependency",
+        "class relationship", "component connection",
+    ],
+}
+
+
+def _quoted_focus_terms(question: str) -> str:
+    terms = []
+    for quoted in re.findall(r"'([^']+)'|\"([^\"]+)\"", question):
+        value = next((part for part in quoted if part), "")
+        if value:
+            terms.append(value)
+    return " ".join(terms)
+
+
+def _deterministic_expand_query(question: str, analysis_type: str) -> str:
+    hints = _FAST_QUERY_HINTS.get(analysis_type, [])
+    if not hints:
         return question
 
+    focus_terms = _quoted_focus_terms(question)
+    variations = [
+        question,
+        " ".join(filter(None, [
+            analysis_type.replace("_", " "),
+            focus_terms,
+            " ".join(hints[:5]),
+        ])),
+        " ".join(filter(None, [question, " ".join(hints[5:])])),
+    ]
 
-def query(question: str,
-          analysis_type: str = "general",
-          top_k: int = None,
-          layer_filter: str = None,
-          type_filter: str = None,
-          target_model: str = None) -> str:
-    """
-    End-to-end RAG query:
-      expand query → embed → retrieve → build prompt → generate answer.
-    """
+    deduped = []
+    seen = set()
+    for entry in variations:
+        cleaned = " ".join(entry.split())
+        if cleaned and cleaned not in seen:
+            deduped.append(cleaned)
+            seen.add(cleaned)
+    return "\n".join(deduped)
+
+
+def _embed_text_cached(text: str) -> List[float]:
+    cached = _cache_get(_query_embedding_cache, text)
+    if cached is not None:
+        return cached
+
+    value = embeddings.embed_text(text)
+    _cache_put(
+        _query_embedding_cache,
+        text,
+        value,
+        config.EMBED_CACHE_MAX_ENTRIES,
+    )
+    return value
+
+
+def expand_query(question: str,
+                 target_model: str,
+                 analysis_type: str = "general") -> str:
+    """Expand a retrieval query using the fastest strategy that keeps quality."""
+    mode = getattr(config, "QUERY_EXPANSION_MODE", "auto").lower()
+    cache_key = (mode, analysis_type, target_model, question)
+    cached = _cache_get(_query_expansion_cache, cache_key)
+    if cached is not None:
+        return cached
+
+    expanded = question
+    if mode == "off":
+        expanded = question
+    elif mode == "auto" and analysis_type in _FAST_QUERY_HINTS:
+        expanded = _deterministic_expand_query(question, analysis_type)
+    else:
+        try:
+            prompt = (
+                "Given the following question about an Android codebase, provide 3 alternative "
+                "search queries using different technical synonyms or related concepts to help "
+                "with vector similarity search. List them on separate lines.\n\n"
+                f"Question: {question}\n\nSearch Queries:"
+            )
+            variations = generate(
+                prompt,
+                model=target_model,
+                temperature=0.1,
+                max_tokens=128,
+                context_size=2048,
+            )
+            if variations:
+                expanded = f"{question}\n{variations}"
+        except Exception:
+            expanded = question
+
+    _cache_put(
+        _query_expansion_cache,
+        cache_key,
+        expanded,
+        config.QUERY_CACHE_MAX_ENTRIES,
+    )
+    return expanded
+
+
+def retrieve_context(question: str,
+                     analysis_type: str = "general",
+                     top_k: int = None,
+                     layer_filter: str = None,
+                     type_filter: str = None,
+                     target_model: str = None,
+                     max_context_chars: int = None) -> str:
+    """Expand, embed, retrieve, and format context with caching and budgeting."""
     if target_model is None:
-        target_model = getattr(config, "MODEL_ROUTING", {}).get(analysis_type, config.LLM_MODEL)
+        target_model = getattr(config, "MODEL_ROUTING", {}).get(
+            analysis_type, config.LLM_MODEL
+        )
 
-    expanded_question = expand_query(question, target_model)
-    
-    # Embed the expanded question
-    q_emb = embeddings.embed_text(expanded_question)
+    max_context_chars = max_context_chars or config.RETRIEVED_CONTEXT_MAX_CHARS
+    cache_key = (
+        _project_fingerprint or "",
+        question,
+        analysis_type,
+        top_k or config.RAG_TOP_K,
+        layer_filter or "",
+        type_filter or "",
+        target_model,
+        max_context_chars,
+        getattr(config, "QUERY_EXPANSION_MODE", "auto"),
+    )
+    cached = _cache_get(_retrieval_cache, cache_key)
+    if cached is not None:
+        return cached
 
-    # Build optional metadata filter
+    expanded_question = expand_query(
+        question,
+        target_model,
+        analysis_type=analysis_type,
+    )
+    q_emb = _embed_text_cached(expanded_question)
+
     where = {}
     if layer_filter:
         where["layer"] = layer_filter
@@ -185,7 +356,42 @@ def query(question: str,
         where=where if where else None,
     )
 
-    context_blocks = _format_retrieved_context(results)
+    context_blocks = _format_retrieved_context(
+        results,
+        max_chars=max_context_chars,
+    )
+    _cache_put(
+        _retrieval_cache,
+        cache_key,
+        context_blocks,
+        config.RETRIEVAL_CACHE_MAX_ENTRIES,
+    )
+    return context_blocks
+
+
+def query(question: str,
+          analysis_type: str = "general",
+          top_k: int = None,
+          layer_filter: str = None,
+          type_filter: str = None,
+          target_model: str = None,
+          max_context_chars: int = None) -> str:
+    """
+    End-to-end RAG query:
+      expand query → embed → retrieve → build prompt → generate answer.
+    """
+    if target_model is None:
+        target_model = getattr(config, "MODEL_ROUTING", {}).get(analysis_type, config.LLM_MODEL)
+
+    context_blocks = retrieve_context(
+        question,
+        analysis_type=analysis_type,
+        top_k=top_k,
+        layer_filter=layer_filter,
+        type_filter=type_filter,
+        target_model=target_model,
+        max_context_chars=max_context_chars,
+    )
     
     prompt = _build_prompt(question, context_blocks, analysis_type, target_model)
     
@@ -199,30 +405,23 @@ def query_stream(question: str,
                  top_k: int = None,
                  layer_filter: str = None,
                  type_filter: str = None,
-                 target_model: str = None):
+                 target_model: str = None,
+                 max_context_chars: int = None):
     """
     Streaming version — yields tokens for the Streamlit chat UI.
     """
     if target_model is None:
         target_model = getattr(config, "MODEL_ROUTING", {}).get(analysis_type, config.LLM_MODEL)
 
-    expanded_question = expand_query(question, target_model)
-
-    q_emb = embeddings.embed_text(expanded_question)
-
-    where = {}
-    if layer_filter:
-        where["layer"] = layer_filter
-    if type_filter:
-        where["component_type"] = type_filter
-
-    results = vector_store.search(
-        q_emb,
-        top_k=top_k or config.RAG_TOP_K,
-        where=where if where else None,
+    context_blocks = retrieve_context(
+        question,
+        analysis_type=analysis_type,
+        top_k=top_k,
+        layer_filter=layer_filter,
+        type_filter=type_filter,
+        target_model=target_model,
+        max_context_chars=max_context_chars,
     )
-
-    context_blocks = _format_retrieved_context(results)
 
     prompt = _build_prompt(question, context_blocks, analysis_type, target_model)
     print(f"\n[LLM Router] Routing stream '{analysis_type}' task to model: {target_model}")
@@ -289,46 +488,6 @@ _ANALYSIS_INSTRUCTIONS = {
         "- Place the first swimlane BEFORE 'start'\n"
         "- Use activity syntax: :Action description;\n"
         "- Use decision diamonds: if (condition?) then (yes) ... else (no) ... endif\n"
-        "- Keep the total flow to 8-12 steps max\n\n"
-        "DO NOT: Include any explanation text outside @startuml/@enduml.\n"
-        "DO NOT: Include any skinparam or styling.\n"
-    ),
-    "dependency_graph": (
-        "Generate a CLEAN, READABLE Graphviz DOT dependency graph from the code context.\n\n"
-        "Think silently. Do NOT include any reasoning or explanation in your output.\n\n"
-        "RULES:\n"
-        "- Generate valid Graphviz DOT syntax.\n"
-        "- Label edges with the precise relationship type.\n"
-        "- Group nodes by architectural layer using subgraphs.\n"
-        "- Output ONLY the DOT code between digraph { and the final }."
-    ),
-    "doc_overview": (
-        "Write a project overview including: App Name, Purpose (one paragraph), "
-        "Target Users, and Core Features (bullet list). Be specific using "
-        "class and method names from the context."
-    ),
-    "doc_architecture": (
-        "Describe the architecture pattern (MVVM/MVP/MVC). List the layers "
-        "(Presentation, Business Logic, Data) with actual class names. "
-        "Include a data flow description."
-    ),
-    "doc_features": (
-        "List ALL features of this application with descriptions, grouped by "
-        "category (Authentication, Main Features, Data Storage, Communication). "
-        "Use actual method names to prove each feature exists."
-    ),
-    "doc_screens": (
-        "List every Activity and Fragment with: Purpose, UI Elements, and "
-        "Navigation targets. Include actual class names."
-    ),
-    "doc_tech_stack": (
-        "List the complete technology stack: Language, Android Components, "
-        "Libraries (from Gradle dependencies), UI framework, networking, "
-        "database, and DI framework."
-    ),
-    "doc_data_flow": (
-        "Describe the data flow architecture: how data moves from API/DB "
-        "to the UI. Include state management approach and concrete class names."
     ),
     "doc_api": (
         "List all API endpoints, network clients, and data models. "
@@ -537,21 +696,54 @@ def _build_prompt(question: str, context: str, analysis_type: str,
     )
 
 
-def _format_retrieved_context(results: Dict) -> str:
-    """Format ChromaDB search results into a readable context string."""
+def _format_retrieved_context(results: Dict,
+                              max_chars: int = None) -> str:
+    """Format ChromaDB search results into a readable, budgeted context string."""
     docs = results.get("documents", [[]])[0]
     metas = results.get("metadatas", [[]])[0]
 
+    max_chars = max_chars or config.RETRIEVED_CONTEXT_MAX_CHARS
     blocks = []
+    total_chars = 0
+    separator = "\n\n---\n\n"
+    seen = set()
     for doc, meta in zip(docs, metas):
+        if not doc:
+            continue
+        unique_key = (
+            meta.get("file_path", ""),
+            meta.get("component_name", ""),
+            meta.get("chunk_type", ""),
+        )
+        if unique_key in seen:
+            continue
+        seen.add(unique_key)
+
         header = (
             f"[{meta.get('chunk_type', '?')}] "
             f"{meta.get('component_name', '?')} "
             f"({meta.get('component_type', '?')}, Layer: {meta.get('layer', '?')})"
         )
-        blocks.append(f"### {header}\n{doc}")
+        block = f"### {header}\n{doc}"
 
-    return "\n\n---\n\n".join(blocks) if blocks else "(No relevant context found)"
+        added_len = len(block) if not blocks else len(separator) + len(block)
+        if total_chars + added_len > max_chars:
+            remaining = max_chars - total_chars
+            if blocks and remaining < 240:
+                break
+            doc_budget = max(remaining - len(header) - 32, 120)
+            trimmed_doc = doc[:doc_budget].rstrip()
+            if trimmed_doc != doc:
+                trimmed_doc += "\n... [truncated]"
+            block = f"### {header}\n{trimmed_doc}"
+            added_len = len(block) if not blocks else len(separator) + len(block)
+            if blocks and total_chars + added_len > max_chars:
+                break
+
+        blocks.append(block)
+        total_chars += added_len
+
+    return separator.join(blocks) if blocks else "(No relevant context found)"
 
 
 # ── Project statistics (no AI needed) ──────────────────────────

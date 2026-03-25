@@ -3,11 +3,21 @@ Central configuration for RAG-ProjectVisualizer.
 All Ollama endpoints, model names, and tuning parameters live here.
 """
 
+import os
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
 # ── Ollama Server ──────────────────────────────────────────────
-OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_BASE_URL = os.getenv("RPV_OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_KEEP_ALIVE = os.getenv("RPV_OLLAMA_KEEP_ALIVE", "30m")
 
 # ── Models ─────────────────────────────────────────────────────
-LLM_MODEL = "deepseek-coder"           # General fallback
+LLM_MODEL = os.getenv("RPV_LLM_MODEL", "deepseek-coder")  # General fallback
 
 # Route specific tasks to the model best suited for it
 MODEL_ROUTING = {
@@ -43,27 +53,73 @@ MODEL_ROUTING = {
     "sec_performance": "deepseek-coder",
 }
 
-EMBEDDING_MODEL = "nomic-embed-text"    # For vector embeddings
+EMBEDDING_MODEL = os.getenv("RPV_EMBEDDING_MODEL", "nomic-embed-text")
+EMBEDDING_GPU_LAYERS = int(os.getenv("RPV_EMBEDDING_GPU_LAYERS", "999"))
 
 # ── Parallel execution ─────────────────────────────────────────
-PARALLEL_MAX_WORKERS = 1                # Max concurrent LLM requests (1 for local Ollama to avoid timeouts)
+PARALLEL_MAX_WORKERS = max(
+    1,
+    int(os.getenv("RPV_PARALLEL_MAX_WORKERS", "2")),
+)
 
 # ── Generation parameters ──────────────────────────────────────
-LLM_TEMPERATURE = 0.3
-LLM_TOP_P = 0.9
-LLM_TOP_K = 40
-LLM_REPEAT_PENALTY = 1.1
-LLM_CONTEXT_SIZE = 8192
-LLM_MAX_TOKENS = 2048
+LLM_TEMPERATURE = float(os.getenv("RPV_LLM_TEMPERATURE", "0.3"))
+LLM_TOP_P = float(os.getenv("RPV_LLM_TOP_P", "0.9"))
+LLM_TOP_K = int(os.getenv("RPV_LLM_TOP_K", "40"))
+LLM_REPEAT_PENALTY = float(os.getenv("RPV_LLM_REPEAT_PENALTY", "1.1"))
+LLM_CONTEXT_SIZE = int(os.getenv("RPV_LLM_CONTEXT_SIZE", "8192"))
+LLM_MAX_TOKENS = int(os.getenv("RPV_LLM_MAX_TOKENS", "2048"))
+
+# Per-model runtime tuning for slower local models.
+DEEPSEEK_UML_CONTEXT_SIZE = int(os.getenv("RPV_DEEPSEEK_UML_CONTEXT_SIZE", "4096"))
+DEEPSEEK_UML_MAX_TOKENS = int(os.getenv("RPV_DEEPSEEK_UML_MAX_TOKENS", "1536"))
+DEEPSEEK_UML_CONTEXT_MAX_CHARS = int(
+    os.getenv("RPV_DEEPSEEK_UML_CONTEXT_MAX_CHARS", "9000")
+)
+DEEPSEEK_USE_NATIVE_JSON_MODE = _env_bool(
+    "RPV_DEEPSEEK_USE_NATIVE_JSON_MODE",
+    True,
+)
+DEEPSEEK_NUM_THREAD = int(
+    os.getenv("RPV_DEEPSEEK_NUM_THREAD", str(os.cpu_count() or 8))
+)
+DEEPSEEK_NUM_BATCH = int(os.getenv("RPV_DEEPSEEK_NUM_BATCH", "512"))
+DEEPSEEK_NUM_GPU = os.getenv("RPV_DEEPSEEK_NUM_GPU", "").strip()
+
+MODEL_RUNTIME_PROFILES = {
+    "deepseek-coder": {
+        "use_native_json_mode": DEEPSEEK_USE_NATIVE_JSON_MODE,
+        "num_thread": DEEPSEEK_NUM_THREAD,
+        "num_batch": DEEPSEEK_NUM_BATCH,
+        "num_gpu": int(DEEPSEEK_NUM_GPU) if DEEPSEEK_NUM_GPU else None,
+    },
+}
 
 # ── RAG parameters ─────────────────────────────────────────────
-CHUNK_MAX_CHARS = 1500          # Max characters per chunk
-RAG_TOP_K = 8                   # Number of chunks to retrieve per query
-EMBEDDING_DIMENSIONS = 768      # nomic-embed-text output dimensions
+CHUNK_MAX_CHARS = int(os.getenv("RPV_CHUNK_MAX_CHARS", "1500"))
+RAG_TOP_K = int(os.getenv("RPV_RAG_TOP_K", "8"))
+EMBEDDING_DIMENSIONS = int(os.getenv("RPV_EMBEDDING_DIMENSIONS", "768"))
+
+QUERY_EXPANSION_MODE = os.getenv("RPV_QUERY_EXPANSION_MODE", "auto")
+QUERY_CACHE_MAX_ENTRIES = int(os.getenv("RPV_QUERY_CACHE_MAX_ENTRIES", "256"))
+EMBED_CACHE_MAX_ENTRIES = int(os.getenv("RPV_EMBED_CACHE_MAX_ENTRIES", "256"))
+RETRIEVAL_CACHE_MAX_ENTRIES = int(
+    os.getenv("RPV_RETRIEVAL_CACHE_MAX_ENTRIES", "128")
+)
+RETRIEVED_CONTEXT_MAX_CHARS = int(
+    os.getenv("RPV_RETRIEVED_CONTEXT_MAX_CHARS", "12000")
+)
+UML_CONTEXT_MAX_CHARS = int(os.getenv("RPV_UML_CONTEXT_MAX_CHARS", "14000"))
 
 # ── ChromaDB ───────────────────────────────────────────────────
 CHROMA_PERSIST_DIR = ".chroma_db"
 CHROMA_COLLECTION_NAME = "project_chunks"
+
+KROKI_URL = os.getenv("RPV_KROKI_URL", "https://kroki.io/plantuml/png")
+PLANTUML_SERVER = os.getenv(
+    "RPV_PLANTUML_SERVER", "http://www.plantuml.com/plantuml"
+)
+RENDER_CACHE_MAX_ENTRIES = int(os.getenv("RPV_RENDER_CACHE_MAX_ENTRIES", "128"))
 
 # ── File scanning ──────────────────────────────────────────────
 SUPPORTED_EXTENSIONS = {".java", ".kt", ".xml", ".gradle", ".kts", ".properties"}

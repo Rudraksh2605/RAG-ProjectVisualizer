@@ -12,6 +12,7 @@ Performance features:
 import logging
 import requests
 from typing import List, Optional
+from requests.adapters import HTTPAdapter
 import config
 
 log = logging.getLogger("embeddings")
@@ -29,6 +30,9 @@ def _get_session() -> requests.Session:
     if _session is None:
         _session = requests.Session()
         _session.headers.update({"Content-Type": "application/json"})
+        adapter = HTTPAdapter(pool_connections=16, pool_maxsize=16, max_retries=0)
+        _session.mount("http://", adapter)
+        _session.mount("https://", adapter)
     return _session
 
 
@@ -102,7 +106,12 @@ def _call_ollama_embed(model: str, text: str) -> List[float]:
     try:
         r = s.post(
             f"{base}/api/embeddings",
-            json={"model": model, "prompt": text},
+            json={
+                "model": model,
+                "prompt": text,
+                "keep_alive": config.OLLAMA_KEEP_ALIVE,
+                "options": {"num_gpu": config.EMBEDDING_GPU_LAYERS},
+            },
             timeout=120,
         )
         if r.status_code == 200:
@@ -119,7 +128,12 @@ def _call_ollama_embed(model: str, text: str) -> List[float]:
     try:
         r = s.post(
             f"{base}/api/embed",
-            json={"model": model, "input": text},
+            json={
+                "model": model,
+                "input": text,
+                "keep_alive": config.OLLAMA_KEEP_ALIVE,
+                "options": {"num_gpu": config.EMBEDDING_GPU_LAYERS},
+            },
             timeout=120,
         )
         if r.status_code == 200:
@@ -154,7 +168,12 @@ def _call_ollama_embed_batch(model: str, texts: List[str]) -> List[List[float]]:
     try:
         r = s.post(
             f"{base}/api/embed",
-            json={"model": model, "input": texts},
+            json={
+                "model": model,
+                "input": texts,
+                "keep_alive": config.OLLAMA_KEEP_ALIVE,
+                "options": {"num_gpu": config.EMBEDDING_GPU_LAYERS},
+            },
             timeout=300,
         )
         if r.status_code == 200:

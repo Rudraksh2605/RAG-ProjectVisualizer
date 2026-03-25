@@ -8,14 +8,48 @@ Uses two rendering backends for reliability:
 
 import re
 import zlib
-import base64
 import requests
 import json
+import hashlib
+import threading
 from io import BytesIO
+from collections import OrderedDict
 from typing import Optional
+from requests.adapters import HTTPAdapter
+import config
 
-KROKI_URL = "https://kroki.io/plantuml/png"
-PLANTUML_SERVER = "http://www.plantuml.com/plantuml"
+KROKI_URL = config.KROKI_URL
+PLANTUML_SERVER = config.PLANTUML_SERVER
+_session: Optional[requests.Session] = None
+_render_cache: "OrderedDict[str, bytes]" = OrderedDict()
+_cache_lock = threading.RLock()
+
+
+def _get_session() -> requests.Session:
+    """Return a shared HTTP session for connection pooling."""
+    global _session
+    if _session is None:
+        _session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=16, pool_maxsize=16, max_retries=0)
+        _session.mount("http://", adapter)
+        _session.mount("https://", adapter)
+    return _session
+
+
+def _cache_get(key: str) -> Optional[bytes]:
+    with _cache_lock:
+        value = _render_cache.get(key)
+        if value is not None:
+            _render_cache.move_to_end(key)
+        return value
+
+
+def _cache_put(key: str, value: bytes):
+    with _cache_lock:
+        _render_cache[key] = value
+        _render_cache.move_to_end(key)
+        while len(_render_cache) > config.RENDER_CACHE_MAX_ENTRIES:
+            _render_cache.popitem(last=False)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -30,7 +64,7 @@ def _render_via_kroki(plantuml_code: str) -> Optional[bytes]:
     try:
         # Kroki accepts the diagram source directly in JSON
         payload = json.dumps({"diagram_source": plantuml_code})
-        r = requests.post(
+        r = _get_session().post(
             KROKI_URL,
             headers={"Content-Type": "application/json"},
             data=payload,
@@ -102,7 +136,7 @@ def _render_via_plantuml_server(plantuml_code: str, accept_error_image: bool = F
     try:
         encoded = _encode_plantuml(plantuml_code)
         url = f"{PLANTUML_SERVER}/png/{encoded}"
-        r = requests.get(url, timeout=30)
+        r = _get_session().get(url, timeout=30)
         content_type = r.headers.get("content-type", "")
         if r.status_code == 200 and "image" in content_type and len(r.content) > 200:
             return r.content
@@ -140,12 +174,18 @@ def render_diagram(plantuml_code: str, debug: bool = False) -> Optional[bytes]:
     code = _clean_plantuml(plantuml_code)
     # Final sanitization to catch any remaining LLM artifacts
     code = _sanitize_for_render(code)
+    cache_key = hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
 
     print(f"[PlantUML Renderer] Rendering diagram ({len(code)} chars)...")
 
     # Try Kroki first (faster, more reliable)
     img = _render_via_kroki(code)
     if img:
+        _cache_put(cache_key, img)
         print(f"[PlantUML Renderer] OK - Kroki rendered successfully ({len(img)} bytes)")
         return img
 
@@ -153,6 +193,7 @@ def render_diagram(plantuml_code: str, debug: bool = False) -> Optional[bytes]:
     print("[PlantUML Renderer] Kroki failed, trying PlantUML server...")
     img = _render_via_plantuml_server(code)
     if img:
+        _cache_put(cache_key, img)
         print(f"[PlantUML Renderer] OK - PlantUML server rendered ({len(img)} bytes)")
         return img
 

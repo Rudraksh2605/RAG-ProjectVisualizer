@@ -41,6 +41,15 @@ def run_parallel(
         except Exception as e:
             return name, f"[Error: {e}]"
 
+    if max_workers <= 1:
+        for name, fn in tasks:
+            task_name, result = _run_task(name, fn)
+            results[task_name] = result
+            completed[0] += 1
+            if progress_callback:
+                progress_callback(f"Completed {completed[0]}/{total}: {task_name}")
+        return results
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(_run_task, name, fn): name

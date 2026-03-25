@@ -166,6 +166,7 @@ def render():
                 st.session_state["do_gen_batch_uml"] = selected_model_batch
                 st.session_state["do_gen_batch_force"] = True
 
+    batch_generated_now = False
     if st.session_state.get("do_gen_batch_uml"):
         selected_model = st.session_state.pop("do_gen_batch_uml")
         force_gen = st.session_state.pop("do_gen_batch_force", False)
@@ -207,6 +208,14 @@ def render():
             with ThreadPoolExecutor(max_workers=4) as pool:
                 rendered = dict(pool.map(_render_one, render_pairs))
 
+        st.session_state["last_batch_order"] = list(batch_selected)
+        st.session_state["last_batch_results"] = results
+        st.session_state["last_batch_images"] = {
+            name: (img.getvalue() if img else None)
+            for name, img in rendered.items()
+        }
+        batch_generated_now = True
+
         # Display each result
         for name in batch_selected:
             puml = results.get(name, "")
@@ -232,4 +241,34 @@ def render():
                 )
 
             with st.expander(f"📝 {name} — PlantUML Source", expanded=False):
+                st.code(puml, language="plantuml")
+
+    if (not batch_generated_now
+            and st.session_state.get("last_batch_results")
+            and st.session_state.get("last_batch_order")):
+        batch_results = st.session_state["last_batch_results"]
+        batch_images = st.session_state.get("last_batch_images", {})
+        for name in st.session_state["last_batch_order"]:
+            puml = batch_results.get(name, "")
+            if not puml:
+                continue
+            st.markdown(f'<div class="diagram-card"><h4>{name}</h4></div>',
+                        unsafe_allow_html=True)
+
+            png_bytes = batch_images.get(name)
+            if png_bytes:
+                st.image(png_bytes, caption=name, use_container_width=True)
+                safe_name = name.lower().replace(" ", "_")
+                st.download_button(
+                    f"Download {name} PNG", png_bytes,
+                    file_name=f"{safe_name}.png",
+                    mime="image/png", key=f"dl_batch_saved_{safe_name}_png",
+                )
+            else:
+                st.error(
+                    f"Could not render {name}. The LLM-generated PlantUML "
+                    f"may have syntax issues. See source below."
+                )
+
+            with st.expander(f"{name} - PlantUML Source", expanded=False):
                 st.code(puml, language="plantuml")

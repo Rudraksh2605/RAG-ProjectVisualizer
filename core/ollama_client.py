@@ -9,6 +9,7 @@ import json
 import requests
 import re
 from typing import Optional, Generator
+from requests.adapters import HTTPAdapter
 import config
 
 
@@ -21,11 +22,24 @@ def _get_session() -> requests.Session:
     global _session
     if _session is None:
         _session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=16, pool_maxsize=16, max_retries=0)
+        _session.mount("http://", adapter)
+        _session.mount("https://", adapter)
     return _session
 
 
 # Tokens that models may leak into their output
 _LEAK_TOKENS = re.compile(r'<\|im_start\|>|<\|im_end\|>|<\|EOT\|>|<\|endoftext\|>')
+
+
+def _get_model_runtime_profile(model: str) -> dict:
+    """Return the first matching model runtime profile from config."""
+    model_name = (model or "").lower()
+    profiles = getattr(config, "MODEL_RUNTIME_PROFILES", {})
+    for pattern, profile in profiles.items():
+        if pattern.lower() in model_name:
+            return profile or {}
+    return {}
 
 
 def _clean_response(text: str) -> str:
@@ -69,27 +83,45 @@ def generate(prompt: str,
     by setting the 'format' parameter in the API request.
     """
     model = model or config.LLM_MODEL
+    profile = _get_model_runtime_profile(model)
+    effective_num_predict = max_tokens or config.LLM_MAX_TOKENS
+    predict_cap = profile.get("num_predict_cap")
+    if predict_cap:
+        effective_num_predict = min(effective_num_predict, predict_cap)
+
+    effective_num_ctx = context_size or config.LLM_CONTEXT_SIZE
+    ctx_cap = profile.get("num_ctx_cap")
+    if ctx_cap:
+        effective_num_ctx = min(effective_num_ctx, ctx_cap)
+
+    options = {
+        "temperature": temperature or config.LLM_TEMPERATURE,
+        "top_p": config.LLM_TOP_P,
+        "top_k": config.LLM_TOP_K,
+        "repeat_penalty": config.LLM_REPEAT_PENALTY,
+        "num_predict": effective_num_predict,
+        "num_ctx": effective_num_ctx,
+    }
+    for key in ("num_thread", "num_batch", "num_gpu"):
+        value = profile.get(key)
+        if value is not None:
+            options[key] = value
+
     body = {
         "model": model,
         "prompt": prompt,
         "stream": False,
-        "options": {
-            "temperature": temperature or config.LLM_TEMPERATURE,
-            "top_p": config.LLM_TOP_P,
-            "top_k": config.LLM_TOP_K,
-            "repeat_penalty": config.LLM_REPEAT_PENALTY,
-            "num_predict": max_tokens or config.LLM_MAX_TOKENS,
-            "num_ctx": context_size or config.LLM_CONTEXT_SIZE,
-        },
+        "keep_alive": config.OLLAMA_KEEP_ALIVE,
+        "options": options,
     }
-    if format_json:
+    if format_json and profile.get("use_native_json_mode", True):
         body["format"] = "json"
     try:
         s = _get_session()
         r = s.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",
             json=body,
-            timeout=300,
+            timeout=600,
         )
         if r.status_code == 200:
             return _clean_response(r.json().get("response", ""))
@@ -105,18 +137,32 @@ def generate_stream(prompt: str,
     Useful for the Streamlit chat interface.
     """
     model = model or config.LLM_MODEL
+    profile = _get_model_runtime_profile(model)
+    options = {
+        "temperature": config.LLM_TEMPERATURE,
+        "top_p": config.LLM_TOP_P,
+        "top_k": config.LLM_TOP_K,
+        "repeat_penalty": config.LLM_REPEAT_PENALTY,
+        "num_predict": min(
+            config.LLM_MAX_TOKENS,
+            profile.get("num_predict_cap", config.LLM_MAX_TOKENS),
+        ),
+        "num_ctx": min(
+            config.LLM_CONTEXT_SIZE,
+            profile.get("num_ctx_cap", config.LLM_CONTEXT_SIZE),
+        ),
+    }
+    for key in ("num_thread", "num_batch", "num_gpu"):
+        value = profile.get(key)
+        if value is not None:
+            options[key] = value
+
     body = {
         "model": model,
         "prompt": prompt,
         "stream": True,
-        "options": {
-            "temperature": config.LLM_TEMPERATURE,
-            "top_p": config.LLM_TOP_P,
-            "top_k": config.LLM_TOP_K,
-            "repeat_penalty": config.LLM_REPEAT_PENALTY,
-            "num_predict": config.LLM_MAX_TOKENS,
-            "num_ctx": config.LLM_CONTEXT_SIZE,
-        },
+        "keep_alive": config.OLLAMA_KEEP_ALIVE,
+        "options": options,
     }
     try:
         s = _get_session()

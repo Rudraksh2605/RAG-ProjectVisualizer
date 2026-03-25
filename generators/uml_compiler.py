@@ -1,373 +1,383 @@
 """
-Deterministic PlantUML Compiler — converts validated IR into PlantUML.
+Deterministic PlantUML compiler.
 
-Key guarantees:
-  - Declarations always precede references.
-  - Aliases are generated deterministically (C1, UC1, P1, S1, etc.).
-  - Names and labels are sanitized (no unescaped quotes, no special chars).
-  - Blocks are always properly balanced ({ }, activate/deactivate, alt/end).
-  - No duplicate declarations.
-  - Consistent formatting.
-
-The compiler owns ALL syntax-sensitive decisions: the LLM never needs to
-produce a single PlantUML keyword.
+The LLM produces structured IR, and this compiler owns the syntax-sensitive
+PlantUML decisions. That keeps PlantUML generation deterministic and makes it
+possible to repair or reject bad IR before rendering.
 """
 
 from __future__ import annotations
-import re
+
 import logging
-from typing import List, Set
+import re
+from typing import Dict, List, Optional, Set, Tuple
 
 from generators.uml_ir import (
-    ClassDiagramIR, ClassIR,
-    UseCaseDiagramIR,
-    SequenceDiagramIR, MessageIR, GroupIR,
-    ActivityDiagramIR, ActivityStepIR,
-    StateDiagramIR,
-    ComponentDiagramIR, ComponentIR,
-    PackageDiagramIR,
-    DeploymentDiagramIR, DeploymentChildIR,
+    ActivityDiagramIR,
+    ActivityStepIR,
+    ClassDiagramIR,
+    ClassIR,
+    ComponentDiagramIR,
+    ComponentIR,
+    DeploymentChildIR,
+    DeploymentDiagramIR,
+    MessageIR,
     NavigationDiagramIR,
+    PackageDiagramIR,
+    SequenceDiagramIR,
+    StateDiagramIR,
+    UseCaseDiagramIR,
 )
 
 log = logging.getLogger("uml_compiler")
 
-# ═══════════════════════════════════════════════════════════════
-#  Shared helpers
-# ═══════════════════════════════════════════════════════════════
 
 def _sanitize_name(name: str) -> str:
-    """Make a name safe for use as a PlantUML identifier."""
-    s = name.strip()
-    if not s:
+    value = (name or "").strip()
+    if not value:
         return "Unknown"
-    # Remove characters that break PlantUML
-    s = re.sub(r'[<>{}()\[\]`~!@#$%^&*=+|\\;]', '', s)
-    s = s.strip()
-    return s if s else "Unknown"
-
-
-def _sanitize_alias(name: str, counter: int, prefix: str = "E") -> str:
-    """Generate a deterministic alias like C1, UC1, P1, etc."""
-    return f"{prefix}{counter}"
+    value = re.sub(r'[<>{}()\[\]`~!@#$%^&*=+|\\;]', "", value)
+    value = value.strip()
+    return value or "Unknown"
 
 
 def _quote(text: str) -> str:
-    """Safely quote a string for PlantUML double-quote contexts."""
-    s = text.replace('"', "'").replace('\n', ' ').strip()
-    return f'"{s}"'
+    safe = (text or "").replace('"', "'").replace("\n", " ").strip()
+    return f'"{safe}"'
 
 
 def _sanitize_label(text: str) -> str:
-    """Clean a relationship/arrow label."""
-    s = text.replace('"', "'").replace('\n', ' ').strip()
-    return s
+    return (text or "").replace('"', "'").replace("\n", " ").strip()
 
 
 def _valid_arrow(arrow: str) -> str:
-    """Validate and return a safe PlantUML arrow type."""
-    allowed = {"-->", "<--", "--|>", "<|--", "..|>", "<|..", "*--", "--*",
-               "o--", "--o", "..>", "<..", "..", "--", "->", "<-"}
+    allowed = {
+        "-->",
+        "<--",
+        "--|>",
+        "<|--",
+        "..|>",
+        "<|..",
+        "*--",
+        "--*",
+        "o--",
+        "--o",
+        "..>",
+        "<..",
+        "..",
+        "--",
+        "->",
+        "<-",
+    }
     return arrow if arrow in allowed else "-->"
 
 
-# ═══════════════════════════════════════════════════════════════
-#  Class Diagram Compiler
-# ═══════════════════════════════════════════════════════════════
+def _usecase_relationship_kind(label: str, arrow: str) -> str:
+    text = f"{label} {arrow}".lower()
+    if "include" in text:
+        return "include"
+    if "extend" in text:
+        return "extend"
+    if "general" in text or "|>" in arrow:
+        return "generalization"
+    return "association"
+
+
+def _normalize_usecase_relationship(
+    source_ref: str,
+    target_ref: str,
+    label: str,
+    arrow: str,
+    actor_refs: Set[str],
+    usecase_refs: Set[str],
+) -> Optional[Tuple[str, str]]:
+    src_kind = "actor" if source_ref in actor_refs else "usecase" if source_ref in usecase_refs else ""
+    tgt_kind = "actor" if target_ref in actor_refs else "usecase" if target_ref in usecase_refs else ""
+    rel_kind = _usecase_relationship_kind(label, arrow)
+
+    if not src_kind or not tgt_kind:
+        return None
+
+    if src_kind == "actor" and tgt_kind == "actor":
+        if rel_kind != "generalization":
+            return None
+        return "--|>", ""
+
+    if "actor" in (src_kind, tgt_kind):
+        if rel_kind not in ("association", "generalization"):
+            if src_kind == "actor" and tgt_kind == "usecase":
+                rel_kind = "association"
+            else:
+                return None
+        if rel_kind == "generalization":
+            return "--|>", ""
+        return "-->", ""
+
+    if rel_kind == "include":
+        return "..>", "<<include>>"
+    if rel_kind == "extend":
+        return "..>", "<<extend>>"
+    if rel_kind == "generalization":
+        return "--|>", ""
+    return "-->", _sanitize_label(label) if label else ""
+
 
 def compile_class_diagram(ir: ClassDiagramIR) -> str:
-    """Compile ClassDiagramIR into valid PlantUML."""
     lines: List[str] = ["@startuml"]
 
     if ir.title:
-        lines.append(f'title {_quote(ir.title)}')
+        lines.append(f"title {_quote(ir.title)}")
     lines.append("")
 
-    # Group classes by package
-    packages: dict = {}
-    no_pkg_classes: List[ClassIR] = []
+    packages: Dict[str, List[ClassIR]] = {}
+    unpackaged: List[ClassIR] = []
     for cls in ir.classes:
-        pkg = cls.package.strip()
-        if pkg:
-            packages.setdefault(pkg, []).append(cls)
+        if cls.package.strip():
+            packages.setdefault(cls.package.strip(), []).append(cls)
         else:
-            no_pkg_classes.append(cls)
+            unpackaged.append(cls)
 
-    declared_names: Set[str] = set()
-    alias_map: dict = {}  # original name -> sanitized name
-    counter = 1
+    alias_map: Dict[str, str] = {}
+    declared: Set[str] = set()
 
     def _emit_class(cls: ClassIR) -> List[str]:
-        nonlocal counter
-        cname = _sanitize_name(cls.name)
-        if cname in declared_names:
+        class_name = _sanitize_name(cls.name)
+        if class_name in declared:
             return []
-        declared_names.add(cname)
-        alias_map[cls.name] = cname
-        clines = []
+        declared.add(class_name)
+        alias_map[cls.name] = class_name
 
-        # Determine keyword
         if cls.is_interface:
-            kw = "interface"
+            keyword = "interface"
         elif cls.is_abstract:
-            kw = "abstract class"
+            keyword = "abstract class"
         else:
-            kw = "class"
+            keyword = "class"
 
-        stereo = f" <<{_sanitize_name(cls.stereotype)}>>" if cls.stereotype else ""
-        clines.append(f'{kw} {_quote(cname)}{stereo} {{')
+        stereotype = f" <<{_sanitize_name(cls.stereotype)}>>" if cls.stereotype else ""
+        output = [f"{keyword} {_quote(class_name)}{stereotype} {{"]
 
-        for f in cls.fields[:5]:  # limit to avoid clutter
-            fname = _sanitize_name(f.name)
-            ftype = f" : {_sanitize_name(f.type)}" if f.type else ""
-            clines.append(f'  {f.visibility}{fname}{ftype}')
+        for field in cls.fields[:5]:
+            field_name = _sanitize_name(field.name)
+            field_type = f" : {_sanitize_name(field.type)}" if field.type else ""
+            output.append(f"  {field.visibility}{field_name}{field_type}")
 
-        for m in cls.methods[:6]:
-            mname = _sanitize_name(m.name)
-            params = f"({_sanitize_label(m.params)})" if m.params else "()"
-            rtype = f" : {_sanitize_name(m.return_type)}" if m.return_type else ""
-            clines.append(f'  {m.visibility}{mname}{params}{rtype}')
+        for method in cls.methods[:6]:
+            method_name = _sanitize_name(method.name)
+            params = f"({_sanitize_label(method.params)})" if method.params else "()"
+            return_type = f" : {_sanitize_name(method.return_type)}" if method.return_type else ""
+            output.append(f"  {method.visibility}{method_name}{params}{return_type}")
 
-        clines.append("}")
-        counter += 1
-        return clines
+        output.append("}")
+        return output
 
-    # Emit packaged classes
-    for pkg_name, classes in packages.items():
-        lines.append(f'package {_quote(pkg_name)} {{')
+    for package_name, classes in packages.items():
+        lines.append(f"package {_quote(package_name)} {{")
         for cls in classes:
-            for cl in _emit_class(cls):
-                lines.append(f'  {cl}')
+            for line in _emit_class(cls):
+                lines.append(f"  {line}")
         lines.append("}")
         lines.append("")
 
-    # Emit unpackaged classes
-    for cls in no_pkg_classes:
+    for cls in unpackaged:
         lines.extend(_emit_class(cls))
         lines.append("")
 
-    # Emit external class stubs (promoted by normalizer)
     if ir.external_classes:
-        lines.append("' -- External collaborators --")
+        lines.append("' External collaborators")
         for ext in ir.external_classes:
-            ename = _sanitize_name(ext.name)
-            if ename not in declared_names:
-                declared_names.add(ename)
-                alias_map[ext.name] = ename
-                stereo = ext.stereotype or "External"
-                lines.append(f'class {_quote(ename)} <<{_sanitize_name(stereo)}>>')
+            ext_name = _sanitize_name(ext.name)
+            if ext_name in declared:
+                continue
+            declared.add(ext_name)
+            alias_map[ext.name] = ext_name
+            stereotype = _sanitize_name(ext.stereotype or "External")
+            lines.append(f"class {_quote(ext_name)} <<{stereotype}>>")
         lines.append("")
 
-    # Emit relationships — only between declared entities
     for rel in ir.relationships:
         src = alias_map.get(rel.source, _sanitize_name(rel.source))
         tgt = alias_map.get(rel.target, _sanitize_name(rel.target))
-        arrow = _valid_arrow(rel.arrow_type)
         label = f" : {_sanitize_label(rel.label)}" if rel.label else ""
-        lines.append(f'{_quote(src)} {arrow} {_quote(tgt)}{label}')
+        lines.append(f"{_quote(src)} {_valid_arrow(rel.arrow_type)} {_quote(tgt)}{label}")
 
     lines.append("")
 
-    # Emit notes
     for note in ir.notes:
         target = alias_map.get(note.target, _sanitize_name(note.target))
-        lines.append(f'note {note.position} of {_quote(target)} : {_sanitize_label(note.text)}')
+        lines.append(f"note {note.position} of {_quote(target)} : {_sanitize_label(note.text)}")
 
     lines.append("")
     lines.append("@enduml")
     return "\n".join(lines)
 
 
-# ═══════════════════════════════════════════════════════════════
-#  Use Case Diagram Compiler
-# ═══════════════════════════════════════════════════════════════
-
 def compile_usecase_diagram(ir: UseCaseDiagramIR) -> str:
-    """Compile UseCaseDiagramIR into valid PlantUML."""
     lines: List[str] = ["@startuml"]
 
     if ir.title:
-        lines.append(f'title {_quote(ir.title)}')
+        lines.append(f"title {_quote(ir.title)}")
     lines.append("left to right direction")
     lines.append("")
 
-    alias_map: dict = {}
-    declared: Set[str] = set()
+    alias_map: Dict[str, str] = {}
+    declared_aliases: Set[str] = set()
+    actor_refs: Set[str] = set()
+    usecase_refs: Set[str] = set()
 
-    # Declare actors
-    for i, actor in enumerate(ir.actors, 1):
-        aname = _sanitize_name(actor.name)
-        alias = actor.alias.strip() or f"A{i}"
-        alias = re.sub(r'\W+', '', alias)  # ensure safe alias
-        if alias in declared:
-            alias = f"A{i}_{aname[:3]}"
-        declared.add(alias)
+    for index, actor in enumerate(ir.actors, 1):
+        actor_name = _sanitize_name(actor.name)
+        alias = re.sub(r"\W+", "", actor.alias.strip() or f"A{index}")
+        if alias in declared_aliases:
+            alias = f"A{index}_{actor_name[:3]}"
+        declared_aliases.add(alias)
         alias_map[actor.name] = alias
+        actor_refs.add(actor.name)
         if actor.alias and actor.alias != actor.name:
-            alias_map[actor.alias] = alias  # LLM alias → compiler alias
-        lines.append(f'actor {_quote(aname)} as {alias}')
+            alias_map[actor.alias] = alias
+            actor_refs.add(actor.alias)
+        lines.append(f"actor {_quote(actor_name)} as {alias}")
 
     lines.append("")
 
-    # System boundary with use cases
-    sys_name = _sanitize_name(ir.system_name) if ir.system_name else "System"
-    lines.append(f'rectangle {_quote(sys_name)} {{')
-
-    for i, uc in enumerate(ir.usecases, 1):
-        ucname = _sanitize_name(uc.name)
-        alias = uc.alias.strip() or f"UC{i}"
-        alias = re.sub(r'\W+', '', alias)
-        if alias in declared:
-            alias = f"UC{i}_{ucname[:3]}"
-        declared.add(alias)
-        alias_map[uc.name] = alias
-        if uc.alias and uc.alias != uc.name:
-            alias_map[uc.alias] = alias  # LLM alias → compiler alias
-        lines.append(f'  usecase {_quote(ucname)} as {alias}')
-
+    system_name = _sanitize_name(ir.system_name) if ir.system_name else "System"
+    lines.append(f"rectangle {_quote(system_name)} {{")
+    for index, usecase in enumerate(ir.usecases, 1):
+        usecase_name = _sanitize_name(usecase.name)
+        alias = re.sub(r"\W+", "", usecase.alias.strip() or f"UC{index}")
+        if alias in declared_aliases:
+            alias = f"UC{index}_{usecase_name[:3]}"
+        declared_aliases.add(alias)
+        alias_map[usecase.name] = alias
+        usecase_refs.add(usecase.name)
+        if usecase.alias and usecase.alias != usecase.name:
+            alias_map[usecase.alias] = alias
+            usecase_refs.add(usecase.alias)
+        lines.append(f"  usecase {_quote(usecase_name)} as {alias}")
     lines.append("}")
     lines.append("")
 
-    # Relationships — only using declared aliases
     for rel in ir.relationships:
         src = alias_map.get(rel.source, rel.source)
         tgt = alias_map.get(rel.target, rel.target)
-        # Verify both endpoints exist
-        if src not in declared and rel.source not in declared:
-            log.warning("Use case relationship source %r not declared, skipping", rel.source)
+        if src not in declared_aliases or tgt not in declared_aliases:
+            log.warning("Use case relationship references undeclared endpoint, skipping: %r -> %r", rel.source, rel.target)
             continue
-        if tgt not in declared and rel.target not in declared:
-            log.warning("Use case relationship target %r not declared, skipping", rel.target)
+        normalized = _normalize_usecase_relationship(
+            rel.source,
+            rel.target,
+            rel.label,
+            rel.arrow_type,
+            actor_refs,
+            usecase_refs,
+        )
+        if not normalized:
+            log.warning("Use case relationship is semantically invalid, skipping: %r -> %r", rel.source, rel.target)
             continue
-        label = f" : {_sanitize_label(rel.label)}" if rel.label else ""
-        arrow = _valid_arrow(rel.arrow_type)
-        lines.append(f'{src} {arrow} {tgt}{label}')
+        arrow, label_text = normalized
+        label = f" : {label_text}" if label_text else ""
+        lines.append(f"{src} {arrow} {tgt}{label}")
 
     lines.append("")
 
-    # Notes
     for note in ir.notes:
-        target = alias_map.get(note.target, note.target)
-        lines.append(f'note {note.position} of {target} : {_sanitize_label(note.text)}')
+        target = alias_map.get(note.target)
+        if not target:
+            log.warning("Use case note target not declared, skipping: %r", note.target)
+            continue
+        lines.append(f"note {note.position} of {target} : {_sanitize_label(note.text)}")
 
     lines.append("")
     lines.append("@enduml")
     return "\n".join(lines)
 
 
-# ═══════════════════════════════════════════════════════════════
-#  Sequence Diagram Compiler
-# ═══════════════════════════════════════════════════════════════
-
 def compile_sequence_diagram(ir: SequenceDiagramIR) -> str:
-    """Compile SequenceDiagramIR into valid PlantUML."""
     lines: List[str] = ["@startuml"]
 
     if ir.title:
-        lines.append(f'title {_quote(ir.title)}')
+        lines.append(f"title {_quote(ir.title)}")
     lines.append("")
 
-    alias_map: dict = {}
-    declared: Set[str] = set()
-    active_set: Set[str] = set()  # track activated participants
+    alias_map: Dict[str, str] = {}
+    declared_aliases: Set[str] = set()
+    active_aliases: Set[str] = set()
 
-    # Declare participants first (guarantees declaration before reference)
-    for i, p in enumerate(ir.participants, 1):
-        pname = _sanitize_name(p.name)
-        alias = p.alias.strip() or f"P{i}"
-        alias = re.sub(r'\W+', '', alias)
-        if alias in declared:
-            alias = f"P{i}_{pname[:3]}"
-        declared.add(alias)
-        alias_map[p.name] = alias
-        if p.alias and p.alias != p.name:
-            alias_map[p.alias] = alias  # LLM alias → compiler alias
-        stereo = f" <<{_sanitize_name(p.stereotype)}>>" if p.stereotype else ""
-        ptype = p.participant_type
-        lines.append(f'{ptype} {_quote(pname)} as {alias}{stereo}')
+    for index, participant in enumerate(ir.participants, 1):
+        participant_name = _sanitize_name(participant.name)
+        alias = re.sub(r"\W+", "", participant.alias.strip() or f"P{index}")
+        if alias in declared_aliases:
+            alias = f"P{index}_{participant_name[:3]}"
+        declared_aliases.add(alias)
+        alias_map[participant.name] = alias
+        if participant.alias and participant.alias != participant.name:
+            alias_map[participant.alias] = alias
+        stereotype = f" <<{_sanitize_name(participant.stereotype)}>>" if participant.stereotype else ""
+        lines.append(f"{participant.participant_type} {_quote(participant_name)} as {alias}{stereotype}")
 
     lines.append("")
 
     def _resolve(name: str) -> str:
         return alias_map.get(name, name)
 
-    def _emit_message(msg: MessageIR):
-        sender = _resolve(msg.sender)
-        receiver = _resolve(msg.receiver)
-        arrow = "-->" if not msg.is_return else "-->>"
-        if msg.is_return:
-            arrow = "-->"
-            # Use dashed arrow for returns
-            arrow = "-->>"
-
-        label = _sanitize_label(msg.label) if msg.label else ""
-
-        if msg.is_return:
-            lines.append(f'{sender} -->> {receiver} : {label}')
+    def _emit_message(message: MessageIR):
+        sender = _resolve(message.sender)
+        receiver = _resolve(message.receiver)
+        label = _sanitize_label(message.label)
+        if message.is_return:
+            lines.append(f"{sender} -->> {receiver} : {label}")
         else:
-            lines.append(f'{sender} -> {receiver} : {label}')
+            lines.append(f"{sender} -> {receiver} : {label}")
 
-        if msg.activate and receiver not in active_set:
-            lines.append(f'activate {receiver}')
-            active_set.add(receiver)
+        if message.activate and receiver not in active_aliases:
+            lines.append(f"activate {receiver}")
+            active_aliases.add(receiver)
+        if message.deactivate and sender in active_aliases:
+            lines.append(f"deactivate {sender}")
+            active_aliases.discard(sender)
 
-        if msg.deactivate and sender in active_set:
-            lines.append(f'deactivate {sender}')
-            active_set.discard(sender)
+    for message in ir.messages:
+        _emit_message(message)
 
-    # Emit top-level messages
-    for msg in ir.messages:
-        _emit_message(msg)
-
-    # Emit groups (alt/opt/loop)
-    for grp in ir.groups:
-        label = _sanitize_label(grp.label)
-        lines.append(f'{grp.group_type} {label}')
-        for msg in grp.messages:
-            _emit_message(msg)
-        if grp.else_messages:
-            else_label = _sanitize_label(grp.else_label) if grp.else_label else ""
-            lines.append(f'else {else_label}')
-            for msg in grp.else_messages:
-                _emit_message(msg)
+    for group in ir.groups:
+        lines.append(f"{group.group_type} {_sanitize_label(group.label)}".rstrip())
+        for message in group.messages:
+            _emit_message(message)
+        if group.else_messages:
+            else_label = f" { _sanitize_label(group.else_label) }" if group.else_label else ""
+            lines.append(f"else{else_label}".rstrip())
+            for message in group.else_messages:
+                _emit_message(message)
         lines.append("end")
 
-    # Deactivate all remaining active participants
-    for alias in list(active_set):
-        lines.append(f'deactivate {alias}')
-    active_set.clear()
+    for alias in list(active_aliases):
+        lines.append(f"deactivate {alias}")
 
     lines.append("")
 
-    # Notes
     for note in ir.notes:
         target = _resolve(note.target)
-        lines.append(f'note {note.position} of {target} : {_sanitize_label(note.text)}')
+        lines.append(f"note {note.position} of {target} : {_sanitize_label(note.text)}")
 
     lines.append("")
     lines.append("@enduml")
     return "\n".join(lines)
 
 
-# ═══════════════════════════════════════════════════════════════
-#  Activity Diagram Compiler
-# ═══════════════════════════════════════════════════════════════
-
 def compile_activity_diagram(ir: ActivityDiagramIR) -> str:
-    """Compile ActivityDiagramIR into valid PlantUML."""
     lines: List[str] = ["@startuml"]
 
     if ir.title:
-        lines.append(f'title {_quote(ir.title)}')
+        lines.append(f"title {_quote(ir.title)}")
     lines.append("")
 
     current_swimlane = ""
 
-    def _switch_swimlane(lane: str):
+    def _switch_swimlane(swimlane: str):
         nonlocal current_swimlane
-        if lane and lane != current_swimlane:
-            lines.append(f'|{_sanitize_name(lane)}|')
-            current_swimlane = lane
+        if swimlane and swimlane != current_swimlane:
+            lines.append(f"|{_sanitize_name(swimlane)}|")
+            current_swimlane = swimlane
 
     def _emit_steps(steps: List[ActivityStepIR]):
         for step in steps:
@@ -375,369 +385,317 @@ def compile_activity_diagram(ir: ActivityDiagramIR) -> str:
                 _switch_swimlane(step.swimlane)
 
             if step.step_type == "action":
-                label = _sanitize_label(step.label) if step.label else "Action"
-                lines.append(f':{label};')
-
+                lines.append(f":{_sanitize_label(step.label) or 'Action'};")
             elif step.step_type == "decision":
-                cond = _sanitize_label(step.condition) if step.condition else "condition?"
-                lines.append(f'if ({cond}) then (yes)')
+                condition = _sanitize_label(step.condition) or "condition?"
+                lines.append(f"if ({condition}) then (yes)")
                 _emit_steps(step.yes_steps)
                 if step.no_steps:
-                    lines.append('else (no)')
+                    lines.append("else (no)")
                     _emit_steps(step.no_steps)
-                lines.append('endif')
-
+                lines.append("endif")
             elif step.step_type == "fork":
-                lines.append('fork')
-                lines.append(f'  :{_sanitize_label(step.label)};')
-                lines.append('fork again')
-
+                lines.append("fork")
+                lines.append(f"  :{_sanitize_label(step.label) or 'Parallel action'};")
+                lines.append("fork again")
             elif step.step_type == "join":
-                lines.append('end fork')
-
+                lines.append("end fork")
             elif step.step_type == "stop":
-                lines.append('stop')
+                lines.append("stop")
 
-    # If swimlanes are defined, emit the first swimlane before "start"
     if ir.swimlanes:
-        first_lane = ir.swimlanes[0] if ir.swimlanes else ""
-        if first_lane:
-            _switch_swimlane(first_lane)
+        _switch_swimlane(ir.swimlanes[0])
 
     lines.append("start")
-
     _emit_steps(ir.steps)
 
-    # Ensure the diagram ends with stop if not already present
-    if not any(s.step_type == "stop" for s in ir.steps):
+    if not any(step.step_type == "stop" for step in ir.steps):
         lines.append("stop")
 
     lines.append("")
 
-    # Notes
     for note in ir.notes:
-        lines.append(f'note {note.position} : {_sanitize_label(note.text)}')
+        lines.append(f"note {note.position} : {_sanitize_label(note.text)}")
 
     lines.append("")
     lines.append("@enduml")
     return "\n".join(lines)
 
 
-# ═══════════════════════════════════════════════════════════════
-#  State Diagram Compiler
-# ═══════════════════════════════════════════════════════════════
-
 def compile_state_diagram(ir: StateDiagramIR) -> str:
-    """Compile StateDiagramIR into valid PlantUML."""
     lines: List[str] = ["@startuml"]
 
     if ir.title:
-        lines.append(f'title {_quote(ir.title)}')
+        lines.append(f"title {_quote(ir.title)}")
     lines.append("")
 
-    alias_map: dict = {}
-    declared: Set[str] = set()
+    alias_map: Dict[str, str] = {}
 
-    # Declare states
-    for i, state in enumerate(ir.states, 1):
-        sname = _sanitize_name(state.name)
-        alias = f"S{i}"
-        declared.add(alias)
+    for index, state in enumerate(ir.states, 1):
+        alias = f"S{index}"
         alias_map[state.name] = alias
         if state.display_name and state.display_name != state.name:
-            alias_map[state.display_name] = alias  # display name → compiler alias
-        display = state.display_name or sname
-        lines.append(f'state {_quote(display)} as {alias}')
-
-        # State body (entry/exit/do actions)
-        has_body = state.entry_action or state.exit_action or state.do_action
-        if has_body:
-            if state.entry_action:
-                lines.append(f'{alias} : entry / {_sanitize_label(state.entry_action)}')
-            if state.do_action:
-                lines.append(f'{alias} : do / {_sanitize_label(state.do_action)}')
-            if state.exit_action:
-                lines.append(f'{alias} : exit / {_sanitize_label(state.exit_action)}')
+            alias_map[state.display_name] = alias
+        display = state.display_name or _sanitize_name(state.name)
+        lines.append(f"state {_quote(display)} as {alias}")
+        if state.entry_action:
+            lines.append(f"{alias} : entry / {_sanitize_label(state.entry_action)}")
+        if state.do_action:
+            lines.append(f"{alias} : do / {_sanitize_label(state.do_action)}")
+        if state.exit_action:
+            lines.append(f"{alias} : exit / {_sanitize_label(state.exit_action)}")
 
     lines.append("")
 
     def _resolve_state(name: str) -> str:
         if name == "[*]":
-            return "[*]"
+            return name
         return alias_map.get(name, _sanitize_name(name))
 
-    # Transitions
-    for tr in ir.transitions:
-        src = _resolve_state(tr.source)
-        tgt = _resolve_state(tr.target)
+    for transition in ir.transitions:
+        src = _resolve_state(transition.source)
+        tgt = _resolve_state(transition.target)
         label_parts = []
-        if tr.label:
-            label_parts.append(_sanitize_label(tr.label))
-        if tr.guard:
-            label_parts.append(f'[{_sanitize_label(tr.guard)}]')
-        label = " ".join(label_parts)
-        label_str = f" : {label}" if label else ""
-        lines.append(f'{src} --> {tgt}{label_str}')
+        if transition.label:
+            label_parts.append(_sanitize_label(transition.label))
+        if transition.guard:
+            label_parts.append(f"[{_sanitize_label(transition.guard)}]")
+        suffix = f" : {' '.join(label_parts)}" if label_parts else ""
+        lines.append(f"{src} --> {tgt}{suffix}")
 
     lines.append("")
 
-    # Notes
     for note in ir.notes:
         target = alias_map.get(note.target, _sanitize_name(note.target))
-        lines.append(f'note {note.position} of {target} : {_sanitize_label(note.text)}')
+        lines.append(f"note {note.position} of {target} : {_sanitize_label(note.text)}")
 
     lines.append("")
     lines.append("@enduml")
     return "\n".join(lines)
 
 
-# ═══════════════════════════════════════════════════════════════
-#  Component Diagram Compiler
-# ═══════════════════════════════════════════════════════════════
-
 def compile_component_diagram(ir: ComponentDiagramIR) -> str:
-    """Compile ComponentDiagramIR into valid PlantUML."""
     lines: List[str] = ["@startuml"]
 
     if ir.title:
-        lines.append(f'title {_quote(ir.title)}')
+        lines.append(f"title {_quote(ir.title)}")
     lines.append("")
 
-    alias_map: dict = {}
-    declared: Set[str] = set()
+    alias_map: Dict[str, str] = {}
     counter = 1
 
-    # Group by package
-    packages: dict = {}
-    no_pkg: list = []
-    for comp in ir.components:
-        pkg = comp.package.strip()
-        if pkg:
-            packages.setdefault(pkg, []).append(comp)
+    packages: Dict[str, List[ComponentIR]] = {}
+    unpackaged: List[ComponentIR] = []
+    for component in ir.components:
+        if component.package.strip():
+            packages.setdefault(component.package.strip(), []).append(component)
         else:
-            no_pkg.append(comp)
+            unpackaged.append(component)
 
-    def _emit_component(comp, indent=""):
+    def _emit_component(component: ComponentIR, indent: str = ""):
         nonlocal counter
-        cname = _sanitize_name(comp.name)
+        name = _sanitize_name(component.name)
         alias = f"COMP{counter}"
         counter += 1
-        declared.add(alias)
-        alias_map[comp.name] = alias
-        stereo = f" <<{_sanitize_name(comp.stereotype)}>>" if comp.stereotype else ""
-        lines.append(f'{indent}[{cname}] as {alias}{stereo}')
+        alias_map[component.name] = alias
+        stereotype = f" <<{_sanitize_name(component.stereotype)}>>" if component.stereotype else ""
+        lines.append(f"{indent}[{name}] as {alias}{stereotype}")
 
-    # Emit interfaces
-    for i, iface in enumerate(ir.interfaces, 1):
-        iname = _sanitize_name(iface.name)
-        alias = iface.alias.strip() or f"I{i}"
-        alias = re.sub(r'\W+', '', alias)
-        declared.add(alias)
+    for index, iface in enumerate(ir.interfaces, 1):
+        alias = re.sub(r"\W+", "", iface.alias.strip() or f"I{index}")
         alias_map[iface.name] = alias
-        lines.append(f'interface {_quote(iname)} as {alias}')
+        if iface.alias and iface.alias != iface.name:
+            alias_map[iface.alias] = alias
+        lines.append(f"interface {_quote(_sanitize_name(iface.name))} as {alias}")
 
     lines.append("")
 
-    # Emit packaged components
-    for pkg_name, comps in packages.items():
-        lines.append(f'package {_quote(pkg_name)} {{')
-        for comp in comps:
-            _emit_component(comp, indent="  ")
+    for package_name, components in packages.items():
+        lines.append(f"package {_quote(package_name)} {{")
+        for component in components:
+            _emit_component(component, indent="  ")
         lines.append("}")
         lines.append("")
 
-    # Emit unpackaged
-    for comp in no_pkg:
-        _emit_component(comp)
+    for component in unpackaged:
+        _emit_component(component)
 
-    # Emit external component stubs (promoted by normalizer)
     if ir.external_components:
         lines.append("")
-        lines.append("' -- External components --")
-        for ext in ir.external_components:
-            nonlocal_name = _sanitize_name(ext.name)
-            ext_alias = f"COMP{counter}"
+        lines.append("' External components")
+        for component in ir.external_components:
+            alias = f"COMP{counter}"
             counter += 1
-            declared.add(ext_alias)
-            alias_map[ext.name] = ext_alias
-            stereo = ext.stereotype or "External"
-            lines.append(f'[{nonlocal_name}] as {ext_alias} <<{_sanitize_name(stereo)}>>')
+            alias_map[component.name] = alias
+            stereotype = _sanitize_name(component.stereotype or "External")
+            lines.append(f"[{_sanitize_name(component.name)}] as {alias} <<{stereotype}>>")
 
     lines.append("")
 
-    # Relationships
     for rel in ir.relationships:
         src = alias_map.get(rel.source, rel.source)
         tgt = alias_map.get(rel.target, rel.target)
         label = f" : {_sanitize_label(rel.label)}" if rel.label else ""
-        arrow = _valid_arrow(rel.arrow_type)
-        lines.append(f'{src} {arrow} {tgt}{label}')
+        lines.append(f"{src} {_valid_arrow(rel.arrow_type)} {tgt}{label}")
 
     lines.append("")
 
-    # Notes
     for note in ir.notes:
         target = alias_map.get(note.target, note.target)
-        lines.append(f'note {note.position} of {target} : {_sanitize_label(note.text)}')
+        lines.append(f"note {note.position} of {target} : {_sanitize_label(note.text)}")
 
     lines.append("")
     lines.append("@enduml")
     return "\n".join(lines)
 
 
-# ═══════════════════════════════════════════════════════════════
-#  Package Diagram Compiler
-# ═══════════════════════════════════════════════════════════════
-
 def compile_package_diagram(ir: PackageDiagramIR) -> str:
-    """Compile PackageDiagramIR into valid PlantUML."""
     lines: List[str] = ["@startuml"]
 
     if ir.title:
-        lines.append(f'title {_quote(ir.title)}')
+        lines.append(f"title {_quote(ir.title)}")
     lines.append("")
 
-    alias_map: dict = {}
+    alias_map: Dict[str, str] = {}
 
-    for i, pkg in enumerate(ir.packages, 1):
-        pname = _sanitize_name(pkg.name)
-        alias = f"PKG{i}"
-        alias_map[pkg.name] = alias
-        lines.append(f'package {_quote(pname)} {{')
-        for cls_name in pkg.classes[:5]:  # limit
-            cname = _sanitize_name(cls_name)
-            lines.append(f'  class {_quote(cname)}')
+    for pkg_index, package in enumerate(ir.packages, 1):
+        package_alias = f"PKG{pkg_index}"
+        alias_map[package.name] = package_alias
+        lines.append(f"package {_quote(_sanitize_name(package.name))} as {package_alias} {{")
+        for class_index, class_name in enumerate(package.classes[:5], 1):
+            class_alias = f"{package_alias}_C{class_index}"
+            alias_map[class_name] = class_alias
+            lines.append(f"  class {_quote(_sanitize_name(class_name))} as {class_alias}")
         lines.append("}")
         lines.append("")
 
-    # Relationships
     for rel in ir.relationships:
-        src = _sanitize_name(rel.source)
-        tgt = _sanitize_name(rel.target)
+        src = alias_map.get(rel.source)
+        tgt = alias_map.get(rel.target)
+        if not src or not tgt:
+            log.warning("Package relationship references undeclared endpoint, skipping: %r -> %r", rel.source, rel.target)
+            continue
         label = f" : {_sanitize_label(rel.label)}" if rel.label else ""
-        arrow = _valid_arrow(rel.arrow_type)
-        lines.append(f'{_quote(src)} {arrow} {_quote(tgt)}{label}')
+        lines.append(f"{src} {_valid_arrow(rel.arrow_type)} {tgt}{label}")
 
     lines.append("")
 
-    # Notes
     for note in ir.notes:
-        lines.append(f'note {note.position} : {_sanitize_label(note.text)}')
+        if note.target:
+            target = alias_map.get(note.target)
+            if not target:
+                log.warning("Package note target not declared, skipping: %r", note.target)
+                continue
+            lines.append(f"note {note.position} of {target} : {_sanitize_label(note.text)}")
+        else:
+            lines.append(f"note {note.position} : {_sanitize_label(note.text)}")
 
     lines.append("")
     lines.append("@enduml")
     return "\n".join(lines)
 
 
-# ═══════════════════════════════════════════════════════════════
-#  Deployment Diagram Compiler
-# ═══════════════════════════════════════════════════════════════
+def _deployment_child_keyword(child: DeploymentChildIR) -> str:
+    mapping = {
+        "artifact": "artifact",
+        "component": "component",
+        "database": "database",
+    }
+    return mapping.get(child.child_type, "artifact")
+
 
 def compile_deployment_diagram(ir: DeploymentDiagramIR) -> str:
-    """Compile DeploymentDiagramIR into valid PlantUML."""
     lines: List[str] = ["@startuml"]
 
     if ir.title:
-        lines.append(f'title {_quote(ir.title)}')
+        lines.append(f"title {_quote(ir.title)}")
     lines.append("")
 
-    alias_map: dict = {}
+    alias_map: Dict[str, str] = {}
     child_counter = 1
 
-    for i, node in enumerate(ir.nodes, 1):
-        nname = _sanitize_name(node.name)
-        alias = f"N{i}"
-        alias_map[node.name] = alias
-        ntype = node.node_type
-        lines.append(f'{ntype} {_quote(nname)} as {alias} {{')
+    for node_index, node in enumerate(ir.nodes, 1):
+        node_alias = f"N{node_index}"
+        alias_map[node.name] = node_alias
+        node_type = node.node_type if node.node_type in {"node", "database", "cloud", "artifact"} else "node"
+        lines.append(f"{node_type} {_quote(_sanitize_name(node.name))} as {node_alias} {{")
         for child in node.children[:5]:
-            cname = _sanitize_name(child.name)
             child_alias = f"CH{child_counter}"
             child_counter += 1
             alias_map[child.name] = child_alias
-            lines.append(f'  [{cname}] as {child_alias}')
+            lines.append(
+                f"  {_deployment_child_keyword(child)} {_quote(_sanitize_name(child.name))} as {child_alias}"
+            )
         lines.append("}")
         lines.append("")
 
-    # Relationships — resolve via alias_map (nodes and children)
     for rel in ir.relationships:
-        src = alias_map.get(rel.source, _sanitize_name(rel.source))
-        tgt = alias_map.get(rel.target, _sanitize_name(rel.target))
+        src = alias_map.get(rel.source)
+        tgt = alias_map.get(rel.target)
+        if not src or not tgt:
+            log.warning("Deployment relationship references undeclared endpoint, skipping: %r -> %r", rel.source, rel.target)
+            continue
         label = f" : {_sanitize_label(rel.label)}" if rel.label else ""
-        arrow = _valid_arrow(rel.arrow_type)
-        lines.append(f'{src} {arrow} {tgt}{label}')
+        lines.append(f"{src} {_valid_arrow(rel.arrow_type)} {tgt}{label}")
 
     lines.append("")
 
     for note in ir.notes:
-        target = alias_map.get(note.target, note.target)
-        lines.append(f'note {note.position} of {target} : {_sanitize_label(note.text)}')
+        target = alias_map.get(note.target)
+        if not target:
+            log.warning("Deployment note target not declared, skipping: %r", note.target)
+            continue
+        lines.append(f"note {note.position} of {target} : {_sanitize_label(note.text)}")
 
     lines.append("")
     lines.append("@enduml")
     return "\n".join(lines)
 
 
-# ═══════════════════════════════════════════════════════════════
-#  Navigation Diagram Compiler (state diagram semantics)
-# ═══════════════════════════════════════════════════════════════
-
 def compile_navigation_diagram(ir: NavigationDiagramIR) -> str:
-    """Compile NavigationDiagramIR into valid PlantUML (state diagram)."""
     lines: List[str] = ["@startuml"]
 
     if ir.title:
-        lines.append(f'title {_quote(ir.title)}')
+        lines.append(f"title {_quote(ir.title)}")
     lines.append("")
 
-    alias_map: dict = {}
-    declared: Set[str] = set()
+    alias_map: Dict[str, str] = {}
 
-    for i, screen in enumerate(ir.screens, 1):
-        sname = _sanitize_name(screen.name)
-        alias = f"SCR{i}"
-        declared.add(alias)
+    for index, screen in enumerate(ir.screens, 1):
+        alias = f"SCR{index}"
         alias_map[screen.name] = alias
         if screen.display_name and screen.display_name != screen.name:
-            alias_map[screen.display_name] = alias  # display name → compiler alias
-        display = screen.display_name or sname
-        lines.append(f'state {_quote(display)} as {alias}')
+            alias_map[screen.display_name] = alias
+        display = screen.display_name or _sanitize_name(screen.name)
+        lines.append(f"state {_quote(display)} as {alias}")
 
     lines.append("")
 
-    # Entry point — resolve via alias_map (accepts both name and display_name)
     entry = alias_map.get(ir.entry_screen, "") if ir.entry_screen else ""
     if entry:
-        lines.append(f'[*] --> {entry}')
+        lines.append(f"[*] --> {entry}")
 
-    # Transitions
-    for tr in ir.transitions:
-        src = "[*]" if tr.source == "[*]" else alias_map.get(tr.source, _sanitize_name(tr.source))
-        tgt = "[*]" if tr.target == "[*]" else alias_map.get(tr.target, _sanitize_name(tr.target))
-        label = f" : {_sanitize_label(tr.label)}" if tr.label else ""
-        lines.append(f'{src} --> {tgt}{label}')
+    for transition in ir.transitions:
+        src = "[*]" if transition.source == "[*]" else alias_map.get(transition.source, _sanitize_name(transition.source))
+        tgt = "[*]" if transition.target == "[*]" else alias_map.get(transition.target, _sanitize_name(transition.target))
+        label = f" : {_sanitize_label(transition.label)}" if transition.label else ""
+        lines.append(f"{src} --> {tgt}{label}")
 
-    # Exit points — resolve via alias_map
-    for exit_scr in ir.exit_screens:
-        resolved = alias_map.get(exit_scr, "")
+    for exit_screen in ir.exit_screens:
+        resolved = alias_map.get(exit_screen, "")
         if resolved:
-            lines.append(f'{resolved} --> [*]')
+            lines.append(f"{resolved} --> [*]")
 
     lines.append("")
 
-    # Notes
     for note in ir.notes:
         target = alias_map.get(note.target, note.target)
-        lines.append(f'note {note.position} of {target} : {_sanitize_label(note.text)}')
+        lines.append(f"note {note.position} of {target} : {_sanitize_label(note.text)}")
 
     lines.append("")
     lines.append("@enduml")
     return "\n".join(lines)
 
-
-# ═══════════════════════════════════════════════════════════════
-#  Compiler registry
-# ═══════════════════════════════════════════════════════════════
 
 COMPILERS = {
     "class_diagram": compile_class_diagram,
@@ -753,7 +711,6 @@ COMPILERS = {
 
 
 def compile_ir(diagram_type: str, ir) -> str:
-    """Compile any IR instance into PlantUML using the appropriate compiler."""
     compiler = COMPILERS.get(diagram_type)
     if compiler is None:
         raise ValueError(f"No compiler for diagram type: {diagram_type}")
