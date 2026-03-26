@@ -17,7 +17,7 @@ def load_css():
         }
         
         .stApp {
-            background: linear-gradient(160deg, #0a0a14 0%, #0f0f1e 30%, #111128 60%, #0d0d1a 100%);
+            background: linear-gradient(160deg, #020617 0%, #0f172a 30%, #1e293b 60%, #020617 100%);
         }
 
         /* Subtle animated noise grain overlay */
@@ -35,19 +35,19 @@ def load_css():
            ═══════════════════════════════════════════════ */
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #3b3b5c; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #8B5CF6; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #0EA5E9; }
 
         /* ═══════════════════════════════════════════════
            Sidebar Styling
            ═══════════════════════════════════════════════ */
         section[data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #0d0d1a 0%, #12122a 50%, #0f0f20 100%) !important;
-            border-right: 1px solid rgba(139, 92, 246, 0.15) !important;
+            background: linear-gradient(180deg, #020617 0%, #0f172a 50%, #090e17 100%) !important;
+            border-right: 1px solid rgba(14, 165, 233, 0.15) !important;
         }
         
         section[data-testid="stSidebar"] .stMarkdown h1 {
-            background: linear-gradient(135deg, #8B5CF6 0%, #06B6D4 50%, #8B5CF6 100%);
+            background: linear-gradient(135deg, #0EA5E9 0%, #10B981 50%, #0EA5E9 100%);
             background-size: 200% 200%;
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
@@ -65,10 +65,10 @@ def load_css():
            Tab Styling
            ═══════════════════════════════════════════════ */
         .stTabs [data-baseweb="tab-list"] {
-            background: rgba(15, 15, 30, 0.6);
+            background: rgba(15, 23, 42, 0.6);
             backdrop-filter: blur(12px);
             border-radius: 14px;
-            border: 1px solid rgba(139, 92, 246, 0.12);
+            border: 1px solid rgba(14, 165, 233, 0.12);
             padding: 4px;
             gap: 4px;
         }
@@ -86,14 +86,14 @@ def load_css():
 
         .stTabs [data-baseweb="tab"]:hover {
             color: #E2E8F0;
-            background: rgba(139, 92, 246, 0.08) !important;
+            background: rgba(14, 165, 233, 0.08) !important;
         }
 
         .stTabs [aria-selected="true"] {
-            background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(6, 182, 212, 0.15)) !important;
+            background: linear-gradient(135deg, rgba(14, 165, 233, 0.2), rgba(16, 185, 129, 0.15)) !important;
             color: #fff !important;
             font-weight: 600;
-            box-shadow: 0 0 20px rgba(139, 92, 246, 0.15);
+            box-shadow: 0 0 20px rgba(14, 165, 233, 0.15);
         }
         
         .stTabs [data-baseweb="tab-highlight"] {
@@ -108,9 +108,9 @@ def load_css():
            Stat Cards — Glassmorphism
            ═══════════════════════════════════════════════ */
         .stat-card {
-            background: linear-gradient(135deg, rgba(26, 26, 50, 0.8) 0%, rgba(30, 30, 60, 0.6) 100%);
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(51, 65, 85, 0.6) 100%);
             backdrop-filter: blur(16px);
-            border: 1px solid rgba(139, 92, 246, 0.15);
+            border: 1px solid rgba(14, 165, 233, 0.15);
             border-radius: 16px;
             padding: 24px 20px;
             text-align: center;
@@ -124,19 +124,19 @@ def load_css():
             position: absolute;
             top: 0; left: -50%; right: -50%;
             height: 1px;
-            background: linear-gradient(90deg, transparent, rgba(139, 92, 246, 0.5), transparent);
+            background: linear-gradient(90deg, transparent, rgba(14, 165, 233, 0.5), transparent);
         }
         .stat-card:hover {
-            border-color: rgba(139, 92, 246, 0.35);
+            border-color: rgba(14, 165, 233, 0.35);
             transform: translateY(-2px);
-            box-shadow: 0 8px 32px rgba(139, 92, 246, 0.12);
+            box-shadow: 0 8px 32px rgba(14, 165, 233, 0.12);
         }
         .stat-card h2 {
             font-size: 2.2rem;
             margin: 0;
             font-weight: 800;
             letter-spacing: -0.02em;
-            background: linear-gradient(135deg, #8B5CF6 0%, #06B6D4 100%);
+            background: linear-gradient(135deg, #0EA5E9 0%, #10B981 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
@@ -182,7 +182,7 @@ def load_css():
            ═══════════════════════════════════════════════ */
         .section-divider {
             border: none;
-            border-top: 1px solid rgba(139, 92, 246, 0.1);
+            border-top: 1px solid rgba(14, 165, 233, 0.1);
             margin: 2rem 0;
             position: relative;
         }
@@ -191,20 +191,20 @@ def load_css():
            Diagram Result Card
            ═══════════════════════════════════════════════ */
         .diagram-card {
-            background: linear-gradient(135deg, rgba(15, 15, 35, 0.9) 0%, rgba(26, 26, 50, 0.7) 100%);
+            background: linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.7) 100%);
             backdrop-filter: blur(12px);
-            border: 1px solid rgba(139, 92, 246, 0.15);
+            border: 1px solid rgba(14, 165, 233, 0.15);
             border-radius: 14px;
             padding: 18px 22px;
             margin-bottom: 14px;
             transition: all 0.3s ease;
         }
         .diagram-card:hover {
-            border-color: rgba(139, 92, 246, 0.3);
-            box-shadow: 0 4px 20px rgba(139, 92, 246, 0.1);
+            border-color: rgba(14, 165, 233, 0.3);
+            box-shadow: 0 4px 20px rgba(14, 165, 233, 0.1);
         }
         .diagram-card h4 {
-            color: #A78BFA;
+            color: #38BDF8;
             margin: 0;
             font-weight: 600;
             font-size: 1.05rem;
@@ -250,7 +250,7 @@ def load_css():
             position: absolute;
             top: 0; left: 0; right: 0;
             height: 3px;
-            background: linear-gradient(90deg, #4ADE80, #22D3EE, #8B5CF6);
+            background: linear-gradient(90deg, #4ADE80, #34D399, #0EA5E9);
         }
         .health-card:hover {
             transform: translateY(-2px);
@@ -260,7 +260,7 @@ def load_css():
             font-size: 3.5rem;
             font-weight: 900;
             letter-spacing: -0.03em;
-            background: linear-gradient(135deg, #4ADE80, #22D3EE);
+            background: linear-gradient(135deg, #4ADE80, #34D399);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
@@ -308,20 +308,20 @@ def load_css():
             font-weight: 600 !important;
             letter-spacing: 0.01em !important;
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-            border: 1px solid rgba(139, 92, 246, 0.2) !important;
+            border: 1px solid rgba(14, 165, 233, 0.2) !important;
         }
         .stButton > button:hover {
             transform: translateY(-1px) !important;
-            box-shadow: 0 4px 20px rgba(139, 92, 246, 0.25) !important;
+            box-shadow: 0 4px 20px rgba(14, 165, 233, 0.25) !important;
         }
         .stButton > button[kind="primary"] {
-            background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%) !important;
+            background: linear-gradient(135deg, #0EA5E9 0%, #0284C7 100%) !important;
             border: none !important;
             color: white !important;
         }
         .stButton > button[kind="primary"]:hover {
-            background: linear-gradient(135deg, #9D74F7 0%, #8B5CF6 100%) !important;
-            box-shadow: 0 6px 24px rgba(139, 92, 246, 0.35) !important;
+            background: linear-gradient(135deg, #38BDF8 0%, #0EA5E9 100%) !important;
+            box-shadow: 0 6px 24px rgba(14, 165, 233, 0.35) !important;
         }
 
         /* ═══════════════════════════════════════════════
@@ -330,12 +330,12 @@ def load_css():
         .stDownloadButton > button {
             border-radius: 10px !important;
             font-weight: 500 !important;
-            border: 1px solid rgba(6, 182, 212, 0.25) !important;
+            border: 1px solid rgba(16, 185, 129, 0.25) !important;
             transition: all 0.3s ease !important;
         }
         .stDownloadButton > button:hover {
-            border-color: rgba(6, 182, 212, 0.5) !important;
-            box-shadow: 0 4px 16px rgba(6, 182, 212, 0.15) !important;
+            border-color: rgba(16, 185, 129, 0.5) !important;
+            box-shadow: 0 4px 16px rgba(16, 185, 129, 0.15) !important;
             transform: translateY(-1px) !important;
         }
 
@@ -343,13 +343,13 @@ def load_css():
            Expander Styling
            ═══════════════════════════════════════════════ */
         .streamlit-expanderHeader {
-            background: rgba(26, 26, 50, 0.5) !important;
+            background: rgba(30, 41, 59, 0.5) !important;
             border-radius: 10px !important;
-            border: 1px solid rgba(139, 92, 246, 0.1) !important;
+            border: 1px solid rgba(14, 165, 233, 0.1) !important;
             font-weight: 500 !important;
         }
         .streamlit-expanderContent {
-            border: 1px solid rgba(139, 92, 246, 0.08) !important;
+            border: 1px solid rgba(14, 165, 233, 0.08) !important;
             border-top: none !important;
             border-radius: 0 0 10px 10px !important;
         }
@@ -359,13 +359,13 @@ def load_css():
            ═══════════════════════════════════════════════ */
         .stTextInput > div > div > input {
             border-radius: 10px !important;
-            border: 1px solid rgba(139, 92, 246, 0.2) !important;
-            background: rgba(15, 15, 30, 0.8) !important;
+            border: 1px solid rgba(14, 165, 233, 0.2) !important;
+            background: rgba(15, 23, 42, 0.8) !important;
             transition: all 0.3s ease !important;
         }
         .stTextInput > div > div > input:focus {
-            border-color: rgba(139, 92, 246, 0.5) !important;
-            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1) !important;
+            border-color: rgba(14, 165, 233, 0.5) !important;
+            box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1) !important;
         }
 
         /* ═══════════════════════════════════════════════
@@ -380,8 +380,8 @@ def load_css():
            ═══════════════════════════════════════════════ */
         .stChatMessage {
             border-radius: 14px !important;
-            border: 1px solid rgba(139, 92, 246, 0.08) !important;
-            background: rgba(20, 20, 40, 0.5) !important;
+            border: 1px solid rgba(14, 165, 233, 0.08) !important;
+            background: rgba(15, 23, 42, 0.5) !important;
             backdrop-filter: blur(8px) !important;
         }
 
@@ -394,8 +394,8 @@ def load_css():
 
         [data-testid="stChatInput"] textarea {
             border-radius: 14px !important;
-            border: 1px solid rgba(139, 92, 246, 0.25) !important;
-            background: rgba(20, 20, 45, 0.9) !important;
+            border: 1px solid rgba(14, 165, 233, 0.25) !important;
+            background: rgba(30, 41, 59, 0.9) !important;
             padding: 14px 18px !important;
             font-size: 0.95rem !important;
             transition: all 0.3s ease !important;
@@ -403,19 +403,19 @@ def load_css():
         }
 
         [data-testid="stChatInput"] textarea:focus {
-            border-color: rgba(139, 92, 246, 0.5) !important;
-            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1), 0 4px 20px rgba(139, 92, 246, 0.15) !important;
+            border-color: rgba(14, 165, 233, 0.5) !important;
+            box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1), 0 4px 20px rgba(14, 165, 233, 0.15) !important;
         }
 
         [data-testid="stChatInput"] button {
             border-radius: 10px !important;
-            background: linear-gradient(135deg, #8B5CF6, #7C3AED) !important;
+            background: linear-gradient(135deg, #0EA5E9, #0284C7) !important;
             transition: all 0.3s ease !important;
         }
 
         [data-testid="stChatInput"] button:hover {
-            background: linear-gradient(135deg, #9D74F7, #8B5CF6) !important;
-            box-shadow: 0 4px 16px rgba(139, 92, 246, 0.3) !important;
+            background: linear-gradient(135deg, #38BDF8, #0EA5E9) !important;
+            box-shadow: 0 4px 16px rgba(14, 165, 233, 0.3) !important;
             transform: scale(1.05) !important;
         }
 
@@ -423,8 +423,8 @@ def load_css():
            Metrics — clean look
            ═══════════════════════════════════════════════ */
         [data-testid="stMetric"] {
-            background: rgba(26, 26, 50, 0.5);
-            border: 1px solid rgba(139, 92, 246, 0.1);
+            background: rgba(30, 41, 59, 0.5);
+            border: 1px solid rgba(14, 165, 233, 0.1);
             border-radius: 12px;
             padding: 14px 18px;
         }
@@ -436,7 +436,7 @@ def load_css():
            Progress bar
            ═══════════════════════════════════════════════ */
         .stProgress > div > div > div {
-            background: linear-gradient(90deg, #8B5CF6, #06B6D4) !important;
+            background: linear-gradient(90deg, #0EA5E9, #10B981) !important;
             border-radius: 10px !important;
         }
 
@@ -444,9 +444,9 @@ def load_css():
            Welcome hero section
            ═══════════════════════════════════════════════ */
         .hero-container {
-            background: linear-gradient(135deg, rgba(15, 15, 35, 0.95) 0%, rgba(26, 26, 60, 0.8) 100%);
+            background: linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.8) 100%);
             backdrop-filter: blur(20px);
-            border: 1px solid rgba(139, 92, 246, 0.15);
+            border: 1px solid rgba(14, 165, 233, 0.15);
             border-radius: 24px;
             padding: 48px 40px;
             text-align: center;
@@ -459,7 +459,7 @@ def load_css():
             position: absolute;
             top: 0; left: 0; right: 0;
             height: 3px;
-            background: linear-gradient(90deg, #8B5CF6, #06B6D4, #8B5CF6);
+            background: linear-gradient(90deg, #0EA5E9, #10B981, #0EA5E9);
             background-size: 200% 100%;
             animation: gradient-shift 3s ease infinite;
         }
@@ -468,7 +468,7 @@ def load_css():
             position: absolute;
             top: -50%; left: -50%;
             width: 200%; height: 200%;
-            background: radial-gradient(circle at 50% 50%, rgba(139, 92, 246, 0.06) 0%, transparent 50%);
+            background: radial-gradient(circle at 50% 50%, rgba(14, 165, 233, 0.06) 0%, transparent 50%);
             pointer-events: none;
         }
         .hero-title {
@@ -477,7 +477,7 @@ def load_css():
             letter-spacing: -0.04em;
             line-height: 1.1;
             margin-bottom: 12px;
-            background: linear-gradient(135deg, #ffffff 0%, #C4B5FD 40%, #06B6D4 100%);
+            background: linear-gradient(135deg, #ffffff 0%, #7DD3FC 40%, #10B981 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
@@ -494,9 +494,9 @@ def load_css():
            Feature cards — welcome page
            ═══════════════════════════════════════════════ */
         .feature-card {
-            background: linear-gradient(135deg, rgba(20, 20, 45, 0.8) 0%, rgba(30, 30, 60, 0.5) 100%);
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(51, 65, 85, 0.5) 100%);
             backdrop-filter: blur(12px);
-            border: 1px solid rgba(139, 92, 246, 0.12);
+            border: 1px solid rgba(14, 165, 233, 0.12);
             border-radius: 16px;
             padding: 24px 20px;
             text-align: center;
@@ -504,9 +504,9 @@ def load_css():
             height: 100%;
         }
         .feature-card:hover {
-            border-color: rgba(139, 92, 246, 0.3);
+            border-color: rgba(14, 165, 233, 0.3);
             transform: translateY(-4px);
-            box-shadow: 0 12px 40px rgba(139, 92, 246, 0.1);
+            box-shadow: 0 12px 40px rgba(14, 165, 233, 0.1);
         }
         .feature-icon {
             font-size: 2.2rem;
@@ -541,7 +541,7 @@ def load_css():
             font-size: 1.4rem;
             font-weight: 700;
             letter-spacing: -0.02em;
-            background: linear-gradient(135deg, #E2E8F0, #A78BFA);
+            background: linear-gradient(135deg, #E2E8F0, #38BDF8);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
@@ -550,17 +550,17 @@ def load_css():
            History project card
            ═══════════════════════════════════════════════ */
         .project-card {
-            background: linear-gradient(135deg, rgba(20, 20, 45, 0.7) 0%, rgba(26, 26, 50, 0.5) 100%);
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(30, 41, 59, 0.5) 100%);
             backdrop-filter: blur(12px);
-            border: 1px solid rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(14, 165, 233, 0.1);
             border-radius: 14px;
             padding: 18px 22px;
             margin-bottom: 10px;
             transition: all 0.3s ease;
         }
         .project-card:hover {
-            border-color: rgba(139, 92, 246, 0.25);
-            box-shadow: 0 4px 20px rgba(139, 92, 246, 0.08);
+            border-color: rgba(14, 165, 233, 0.25);
+            box-shadow: 0 4px 20px rgba(14, 165, 233, 0.08);
         }
 
         /* ═══════════════════════════════════════════════
@@ -568,7 +568,7 @@ def load_css():
            ═══════════════════════════════════════════════ */
         .stCodeBlock {
             border-radius: 12px !important;
-            border: 1px solid rgba(139, 92, 246, 0.1) !important;
+            border: 1px solid rgba(14, 165, 233, 0.1) !important;
         }
 
         /* ═══════════════════════════════════════════════
@@ -580,7 +580,7 @@ def load_css():
         .stRadio [role="radiogroup"] label {
             border-radius: 10px !important;
             padding: 6px 16px !important;
-            border: 1px solid rgba(139, 92, 246, 0.15) !important;
+            border: 1px solid rgba(14, 165, 233, 0.15) !important;
             transition: all 0.3s ease !important;
         }
 
@@ -589,7 +589,7 @@ def load_css():
            ═══════════════════════════════════════════════ */
         [data-testid="stPopover"] > div {
             border-radius: 14px !important;
-            border: 1px solid rgba(139, 92, 246, 0.2) !important;
+            border: 1px solid rgba(14, 165, 233, 0.2) !important;
         }
 
         /* ═══════════════════════════════════════════════
@@ -597,30 +597,30 @@ def load_css():
            ═══════════════════════════════════════════════ */
         [data-baseweb="tag"] {
             border-radius: 8px !important;
-            background: rgba(139, 92, 246, 0.15) !important;
-            border: 1px solid rgba(139, 92, 246, 0.25) !important;
+            background: rgba(14, 165, 233, 0.15) !important;
+            border: 1px solid rgba(14, 165, 233, 0.25) !important;
         }
 
         /* ═══════════════════════════════════════════════
            Divider
            ═══════════════════════════════════════════════ */
         hr {
-            border-color: rgba(139, 92, 246, 0.1) !important;
+            border-color: rgba(14, 165, 233, 0.1) !important;
         }
 
         /* ═══════════════════════════════════════════════
            Tooltips
            ═══════════════════════════════════════════════ */
         .stTooltipIcon {
-            color: #8B5CF6 !important;
+            color: #0EA5E9 !important;
         }
 
         /* ═══════════════════════════════════════════════
            Sidebar metric cards
            ═══════════════════════════════════════════════ */
         .sidebar-stat {
-            background: linear-gradient(135deg, rgba(26, 26, 50, 0.7) 0%, rgba(20, 20, 40, 0.5) 100%);
-            border: 1px solid rgba(139, 92, 246, 0.12);
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.5) 100%);
+            border: 1px solid rgba(14, 165, 233, 0.12);
             border-radius: 12px;
             padding: 12px 16px;
             margin-bottom: 8px;
@@ -638,7 +638,7 @@ def load_css():
         .sidebar-stat .value {
             font-size: 1.2rem;
             font-weight: 700;
-            background: linear-gradient(135deg, #8B5CF6, #06B6D4);
+            background: linear-gradient(135deg, #0EA5E9, #10B981);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
@@ -650,14 +650,14 @@ def load_css():
             font-size: 0.72rem;
             color: #475569;
             padding: 6px 12px;
-            background: rgba(15, 15, 30, 0.5);
+            background: rgba(15, 23, 42, 0.5);
             border-radius: 8px;
             border: 1px solid rgba(71, 85, 105, 0.15);
             text-align: center;
             margin-top: 4px;
         }
         .powered-by strong {
-            color: #8B5CF6;
+            color: #0EA5E9;
         }
     </style>
     """, unsafe_allow_html=True)
