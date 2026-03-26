@@ -1,6 +1,6 @@
 """
 Embedding service — calls Ollama embedding API.
-Auto-detects available model: prefers nomic-embed-text,
+Auto-detects available model: prefers mxbai-embed-large,
 falls back to deepseek-coder (which also supports embeddings).
 
 Performance features:
@@ -48,9 +48,9 @@ def _resolve_embedding_model() -> str:
         if r.status_code == 200:
             models = [m["name"] for m in r.json().get("models", [])]
 
-            # Prefer nomic-embed-text
+            # Prefer mxbai-embed-large
             for m in models:
-                if "nomic-embed-text" in m:
+                if "mxbai-embed-large" in m:
                     _resolved_model = m
                     log.info("Using dedicated embedding model: %s", m)
                     return m
@@ -69,7 +69,7 @@ def _resolve_embedding_model() -> str:
                     log.warning(
                         "No dedicated embedding model found! Falling back to LLM "
                         "model '%s' for embeddings. Retrieval quality will be "
-                        "DEGRADED. Run 'ollama pull nomic-embed-text' for better results.",
+                        "DEGRADED. Run 'ollama pull mxbai-embed-large' for better results.",
                         m,
                     )
                     return m
@@ -151,7 +151,7 @@ def _call_ollama_embed(model: str, text: str) -> List[float]:
 
     raise RuntimeError(
         f"Embedding failed for model '{model}'. "
-        f"Try running: ollama pull nomic-embed-text"
+        f"Try running: ollama pull mxbai-embed-large"
     )
 
 

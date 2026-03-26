@@ -53,7 +53,7 @@ MODEL_ROUTING = {
     "sec_performance": "deepseek-coder",
 }
 
-EMBEDDING_MODEL = os.getenv("RPV_EMBEDDING_MODEL", "nomic-embed-text")
+EMBEDDING_MODEL = os.getenv("RPV_EMBEDDING_MODEL", "mxbai-embed-large:latest")
 EMBEDDING_GPU_LAYERS = int(os.getenv("RPV_EMBEDDING_GPU_LAYERS", "999"))
 
 # ── Parallel execution ─────────────────────────────────────────
@@ -98,7 +98,7 @@ MODEL_RUNTIME_PROFILES = {
 # ── RAG parameters ─────────────────────────────────────────────
 CHUNK_MAX_CHARS = int(os.getenv("RPV_CHUNK_MAX_CHARS", "1500"))
 RAG_TOP_K = int(os.getenv("RPV_RAG_TOP_K", "8"))
-EMBEDDING_DIMENSIONS = int(os.getenv("RPV_EMBEDDING_DIMENSIONS", "768"))
+EMBEDDING_DIMENSIONS = int(os.getenv("RPV_EMBEDDING_DIMENSIONS", "1024"))
 
 QUERY_EXPANSION_MODE = os.getenv("RPV_QUERY_EXPANSION_MODE", "auto")
 QUERY_CACHE_MAX_ENTRIES = int(os.getenv("RPV_QUERY_CACHE_MAX_ENTRIES", "256"))
