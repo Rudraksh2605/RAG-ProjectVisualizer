@@ -10,8 +10,11 @@ def _cached_ollama_status():
 def render_sidebar():
     """Renders the left sidebar for configuration and status."""
     with st.sidebar:
-        st.markdown("# 🔍 RAG Visualizer")
-        st.caption("Powered by DeepSeek Coder + Ollama")
+        st.markdown("# 🤖 Android Visualizer")
+        st.markdown(
+            '<div class="powered-by">Powered by <strong>DeepSeek Coder</strong> + <strong>Ollama</strong></div>',
+            unsafe_allow_html=True,
+        )
         st.markdown("---")
 
         # Ollama status check (cached — avoids HTTP call on every re-render)
@@ -45,8 +48,20 @@ def render_sidebar():
         if st.session_state.get("active_project") and rag_engine.get_project_path() == st.session_state["active_project"]:
             stats = rag_engine.get_project_stats()
             overview = analysis.get_overview(stats)
-            st.metric("Indexed Chunks", overview["total_chunks"])
-            st.metric("Total Classes", overview["total_classes"])
-            st.metric("Files Parsed", overview["total_files"])
+            st.markdown(
+                f'<div class="sidebar-stat"><span class="label">Indexed Chunks</span>'
+                f'<span class="value">{overview["total_chunks"]}</span></div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f'<div class="sidebar-stat"><span class="label">Total Classes</span>'
+                f'<span class="value">{overview["total_classes"]}</span></div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f'<div class="sidebar-stat"><span class="label">Files Parsed</span>'
+                f'<span class="value">{overview["total_files"]}</span></div>',
+                unsafe_allow_html=True,
+            )
             
         return project_path, analyze_btn

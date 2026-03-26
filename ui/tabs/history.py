@@ -3,7 +3,13 @@ import os
 from utils import history_manager
 
 def render():
-    st.markdown("### 🕒 Recent Projects")
+    st.markdown(
+        '<div class="section-header">'
+        '<span class="icon">🕒</span>'
+        '<span class="title">Recent Projects</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
     projects = history_manager.get_all_projects()
 
     if not projects:
@@ -16,6 +22,10 @@ def render():
         stats = info.get("stats", {})
         dt = info.get("last_accessed", "").replace("T", " ")[:16]  # simplified date format
 
+        st.markdown(
+            f'<div class="project-card"></div>',
+            unsafe_allow_html=True,
+        )
         with st.container():
             col1, col2, col3 = st.columns([3, 1, 1])
             with col1:

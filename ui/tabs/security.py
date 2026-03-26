@@ -5,11 +5,17 @@ import config
 
 def render():
     """Renders the Security & Code Quality tab."""
-    st.markdown("## 🛡️ Security & Code Quality Scanner")
+    st.markdown(
+        '<div class="section-header">'
+        '<span class="icon">🛡️</span>'
+        '<span class="title">Security & Code Quality Scanner</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
     st.caption(
         "AI-powered security audit and code smell detection. "
-        "Scans are performed using RAG to retrieve relevant code and the LLM "
-        "acts as a senior security auditor."
+        "Scans are performed using intelligent retrieval of relevant code, "
+        "with the LLM acting as a senior security auditor."
     )
 
     scan_mode = st.radio(

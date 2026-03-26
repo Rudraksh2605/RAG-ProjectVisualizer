@@ -1,6 +1,6 @@
 """
-RAG-ProjectVisualizer — Streamlit App
-======================================
+Android Project Visualizer — Streamlit App
+===========================================
 Analyze Android projects with RAG + DeepSeek Coder 6.7B.
 
 Run:  streamlit run app.py
@@ -16,7 +16,7 @@ import streamlit as st
 # Must be the FIRST Streamlit call
 st.set_page_config(
     page_title="Android Project Visualizer",
-    page_icon="🔍",
+    page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -83,9 +83,41 @@ if analyze_btn and project_path:
 # ═══════════════════════════════════════════════════════════════
 
 if not st.session_state.active_project:
-    st.markdown("## 👋 Welcome to RAG Project Visualizer")
+    # ── Hero welcome section ──
     st.markdown(
-        "Enter an Android project path in the sidebar and click "
+        '<div class="hero-container">'
+        '<div class="hero-title">Android Project Visualizer</div>'
+        '<div class="hero-subtitle">'
+        'Analyze your Android codebase with AI-powered insights. '
+        'Generate diagrams, detect vulnerabilities, explore dependencies, '
+        'and chat with your code — all powered by local LLMs.'
+        '</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Feature cards ──
+    cols = st.columns(4)
+    features = [
+        ("📐", "Diagrams", "Generate class, sequence, activity, and more diagrams automatically"),
+        ("🔗", "Dependencies", "Visualize project structure and dependency graphs"),
+        ("🛡️", "Code Quality", "AI security audit with severity-ranked findings"),
+        ("💬", "Chat", "Ask questions about your codebase with RAG-powered answers"),
+    ]
+    for col, (icon, title, desc) in zip(cols, features):
+        with col:
+            st.markdown(
+                f'<div class="feature-card">'
+                f'<span class="feature-icon">{icon}</span>'
+                f'<div class="feature-title">{title}</div>'
+                f'<div class="feature-desc">{desc}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("")
+    st.markdown(
+        "👉 Enter an Android project path in the sidebar and click "
         "**Analyze Project** to get started."
     )
     st.markdown("---")

@@ -4,7 +4,13 @@ from core import rag_engine
 
 def render():
     """Renders the Overview tab."""
-    st.markdown("## Project Overview")
+    st.markdown(
+        '<div class="section-header">'
+        '<span class="icon">📊</span>'
+        '<span class="title">Project Overview</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
     # Gather stats
     stats = rag_engine.get_project_stats()

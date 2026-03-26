@@ -149,7 +149,13 @@ def _markdown_to_pdf(md_text: str) -> bytes:
 
 def render():
     """Renders the Documentation tab."""
-    st.markdown("## AI-Generated Documentation")
+    st.markdown(
+        '<div class="section-header">'
+        '<span class="icon">📖</span>'
+        '<span class="title">AI-Generated Documentation</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
     doc_mode = st.radio(
         "Mode:", ["Single Section", "Full Report (Parallel ⚡)"],

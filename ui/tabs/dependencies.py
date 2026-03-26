@@ -7,7 +7,13 @@ import config
 
 def render():
     """Renders the Dependency Graph tab."""
-    st.markdown("## Dependency Graph")
+    st.markdown(
+        '<div class="section-header">'
+        '<span class="icon">🔗</span>'
+        '<span class="title">Dependency Graph</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
     dep_mode = st.radio(
         "Graph type:",

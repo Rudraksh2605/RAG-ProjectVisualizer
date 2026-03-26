@@ -13,10 +13,16 @@ def _render_one(name_puml):
     return name, render_to_bytesio(puml)
 
 def render():
-    """Renders the UML Diagrams tab."""
-    st.markdown("## 📐 UML Diagrams")
+    """Renders the Diagrams tab."""
+    st.markdown(
+        '<div class="section-header">'
+        '<span class="icon">📐</span>'
+        '<span class="title">Diagrams</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
     st.caption(
-        "Generate 8 types of UML diagrams using RAG + LLM. "
+        "Generate 8 types of architectural diagrams using AI + LLM. "
         "Select a single diagram or use **Batch Generate** to create "
         "multiple diagrams in parallel with threading."
     )
@@ -69,7 +75,7 @@ def render():
     if st.session_state.get("do_gen_single_uml"):
         selected_model = st.session_state.pop("do_gen_single_uml")
         force_gen = st.session_state.pop("do_gen_single_force", False)
-        with st.spinner(f"Generating {selected_diagram} via RAG + {selected_model}…"):
+        with st.spinner(f"Generating {selected_diagram} via AI + {selected_model}…"):
             if needs_focus and focus_sel and focus_sel != "(All Classes)":
                 puml = gen_func(focus_sel, target_model=selected_model, force=force_gen)
             elif needs_focus:
@@ -115,14 +121,14 @@ def render():
                     path = _save_file(jpg_buf.getvalue(), f"{safe_name}.jpg")
                     st.success(f"✅ Saved to `{path}`")
             with dl_col3:
-                if st.button("💾 Save .puml", key="save_puml"):
+                if st.button("💾 Save Source", key="save_puml"):
                     path = _save_file(puml, f"{safe_name}.puml")
                     st.success(f"✅ Saved to `{path}`")
         else:
             st.error(
-                "⚠️ **Rendering failed.** The PlantUML code could not be rendered. "
+                "⚠️ **Rendering failed.** The diagram source could not be rendered. "
                 "This may indicate a syntax issue that was not caught by validation. "
-                "Review the PlantUML source below and try **Regenerate**."
+                "Review the source below and try **Regenerate**."
             )
             st.info(
                 "💡 The diagram source is shown below. You can copy it and paste into "
@@ -130,7 +136,7 @@ def render():
             )
 
         with st.expander(
-            "📝 View PlantUML Source Code",
+            "📝 View Diagram Source Code",
             expanded=not bool(png_bytes),
         ):
             st.code(puml, language="plantuml")
@@ -236,11 +242,11 @@ def render():
                 )
             else:
                 st.error(
-                    f"⚠️ Could not render {name}. The LLM-generated PlantUML "
+                    f"⚠️ Could not render {name}. The LLM-generated diagram "
                     f"may have syntax issues. See source below."
                 )
 
-            with st.expander(f"📝 {name} — PlantUML Source", expanded=False):
+            with st.expander(f"📝 {name} — Source", expanded=False):
                 st.code(puml, language="plantuml")
 
     if (not batch_generated_now
@@ -266,9 +272,9 @@ def render():
                 )
             else:
                 st.error(
-                    f"Could not render {name}. The LLM-generated PlantUML "
+                    f"Could not render {name}. The LLM-generated diagram "
                     f"may have syntax issues. See source below."
                 )
 
-            with st.expander(f"{name} - PlantUML Source", expanded=False):
+            with st.expander(f"{name} - Source", expanded=False):
                 st.code(puml, language="plantuml")
