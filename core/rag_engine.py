@@ -19,6 +19,13 @@ from utils.helpers import scan_project_files
 from utils import history_manager
 import config
 
+# ── GraphRAG + LangChain (optional, graceful fallback) ─────────
+try:
+    from core import graph_store, graph_builder, langchain_rag
+    _GRAPH_MODULES_AVAILABLE = True
+except ImportError:
+    _GRAPH_MODULES_AVAILABLE = False
+
 
 # ── Project-level cache ────────────────────────────────────────
 _parsed_files: List[Dict] = []
@@ -84,7 +91,8 @@ def index_project(project_path: str,
                   force: bool = False) -> Dict:
     """
     Full indexing pipeline:
-      scan files → parse → chunk → embed → store in ChromaDB.
+      scan files → parse → chunk → embed → store in ChromaDB
+      → (optional) build Neo4j knowledge graph.
 
     Skips re-indexing if the project hasn't changed (same files and sizes)
     unless *force* is True.
@@ -142,13 +150,36 @@ def index_project(project_path: str,
         [c.content for c in _chunks], progress_callback=_emb_progress
     )
 
-    # 5. Store
+    # 5. Store in ChromaDB
     if progress:
         progress("Storing in vector database…")
     vector_store.reset_collection()
     vector_store.upsert_chunks(_chunks, emb_vectors)
 
-    # 6. Save fingerprint for future skip-check
+    # 6. Build Neo4j Knowledge Graph (optional)
+    graph_stats = {"nodes_created": 0, "relationships_created": 0}
+    if _GRAPH_MODULES_AVAILABLE and config.GRAPHRAG_ENABLED:
+        if progress:
+            progress("Initializing knowledge graph…")
+        neo4j_ok = graph_store.init(
+            config.NEO4J_URI,
+            config.NEO4J_USERNAME,
+            config.NEO4J_PASSWORD,
+            config.NEO4J_DATABASE,
+        )
+        if neo4j_ok:
+            graph_stats = graph_builder.build_graph(
+                _parsed_files, project_path, progress=progress,
+            )
+        else:
+            if progress:
+                progress("⚠️ Neo4j unavailable — using ChromaDB only.")
+
+        # Reset LangChain state so it picks up new index
+        if langchain_rag.is_available():
+            langchain_rag.reset()
+
+    # 7. Save fingerprint for future skip-check
     _project_fingerprint = new_fp
     clear_runtime_caches()
 
@@ -157,13 +188,20 @@ def index_project(project_path: str,
         "parsed": len(_parsed_files),
         "chunks": len(_chunks),
         "indexed": True,
+        "graph_nodes": graph_stats.get("nodes_created", 0),
+        "graph_relationships": graph_stats.get("relationships_created", 0),
     }
     
-    # 7. Add to persistent history
+    # 8. Add to persistent history
     history_manager.add_project_history(project_path, stats)
     
     if progress:
-        progress(f"✅ Indexed {stats['chunks']} chunks from {stats['parsed']} files.")
+        graph_msg = ""
+        if stats["graph_nodes"] > 0:
+            graph_msg = (f" | Graph: {stats['graph_nodes']} nodes, "
+                         f"{stats['graph_relationships']} relationships")
+        progress(f"✅ Indexed {stats['chunks']} chunks from "
+                 f"{stats['parsed']} files{graph_msg}.")
     return stats
 
 
@@ -379,7 +417,25 @@ def query(question: str,
     """
     End-to-end RAG query:
       expand query → embed → retrieve → build prompt → generate answer.
+
+    For 'general' (chat) queries, routes through LangChain hybrid
+    retrieval when available. Other analysis types (UML, security)
+    continue using the native pipeline.
     """
+    # Route general/chat queries through LangChain when available
+    if (analysis_type == "general"
+            and _GRAPH_MODULES_AVAILABLE
+            and config.LANGCHAIN_ENABLED
+            and langchain_rag.is_available()):
+        return langchain_rag.hybrid_query(
+            question,
+            analysis_type=analysis_type,
+            top_k=top_k,
+            layer_filter=layer_filter,
+            target_model=target_model,
+        )
+
+    # Native pipeline for non-chat queries (UML, security, docs)
     if target_model is None:
         target_model = getattr(config, "MODEL_ROUTING", {}).get(analysis_type, config.LLM_MODEL)
 
@@ -409,7 +465,23 @@ def query_stream(question: str,
                  max_context_chars: int = None):
     """
     Streaming version — yields tokens for the Streamlit chat UI.
+
+    Routes through LangChain for general/chat queries when available.
     """
+    # Route chat through LangChain streaming when available
+    if (analysis_type == "general"
+            and _GRAPH_MODULES_AVAILABLE
+            and config.LANGCHAIN_ENABLED
+            and langchain_rag.is_available()):
+        return langchain_rag.hybrid_query_stream(
+            question,
+            analysis_type=analysis_type,
+            top_k=top_k,
+            layer_filter=layer_filter,
+            target_model=target_model,
+        )
+
+    # Native pipeline for non-chat queries
     if target_model is None:
         target_model = getattr(config, "MODEL_ROUTING", {}).get(analysis_type, config.LLM_MODEL)
 
@@ -760,7 +832,18 @@ def get_project_stats() -> Dict:
         "classes": [],
         "components_by_type": {},
         "components_by_layer": {},
+        "graph_nodes": 0,
+        "graph_relationships": 0,
     }
+
+    # Fetch graph stats if Neo4j is active
+    if _GRAPH_MODULES_AVAILABLE and graph_store.is_available():
+        nodes = graph_store.run_cypher("MATCH (n) RETURN count(n) as count")
+        rels = graph_store.run_cypher("MATCH ()-[r]->() RETURN count(r) as count")
+        if nodes:
+            stats["graph_nodes"] = nodes[0].get("count", 0)
+        if rels:
+            stats["graph_relationships"] = rels[0].get("count", 0)
 
     for pf in _parsed_files:
         lang = pf.get("language", pf.get("type", ""))

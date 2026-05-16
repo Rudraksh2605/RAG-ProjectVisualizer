@@ -33,6 +33,29 @@ def render():
                 unsafe_allow_html=True,
             )
 
+    # Graph stats row (if active)
+    if stats.get("graph_nodes", 0) > 0:
+        st.markdown('<div style="margin-top: 1rem;"></div>', unsafe_allow_html=True)
+        gcol1, gcol2, gcol3, _ = st.columns([1, 1, 1, 3])
+        with gcol1:
+            st.markdown(
+                f'<div class="stat-card" style="border-left: 4px solid #00d4ff;">'
+                f'<h2>{stats["graph_nodes"]}</h2><p>Graph Nodes</p></div>',
+                unsafe_allow_html=True,
+            )
+        with gcol2:
+            st.markdown(
+                f'<div class="stat-card" style="border-left: 4px solid #00d4ff;">'
+                f'<h2>{stats["graph_relationships"]}</h2><p>Graph Relationships</p></div>',
+                unsafe_allow_html=True,
+            )
+        with gcol3:
+            st.markdown(
+                f'<div class="stat-card" style="border-left: 4px solid #00d4ff;">'
+                f'<h2>Active</h2><p>GraphRAG Status</p></div>',
+                unsafe_allow_html=True,
+            )
+
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
     # Architecture pattern

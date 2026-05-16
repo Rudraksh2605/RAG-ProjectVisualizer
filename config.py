@@ -124,3 +124,22 @@ RENDER_CACHE_MAX_ENTRIES = int(os.getenv("RPV_RENDER_CACHE_MAX_ENTRIES", "128"))
 # ── File scanning ──────────────────────────────────────────────
 SUPPORTED_EXTENSIONS = {".java", ".kt", ".xml", ".gradle", ".kts", ".properties"}
 IGNORE_DIRS = {".git", ".gradle", ".idea", "build", "bin", "node_modules", "__pycache__", ".chroma_db"}
+
+# ── Neo4j / GraphRAG ──────────────────────────────────────────
+NEO4J_URI = os.getenv("RPV_NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USERNAME = os.getenv("RPV_NEO4J_USERNAME", "neo4j")
+NEO4J_PASSWORD = os.getenv("RPV_NEO4J_PASSWORD", "password")
+NEO4J_DATABASE = os.getenv("RPV_NEO4J_DATABASE", "neo4j")
+
+# When True, system uses hybrid retrieval (ChromaDB + Neo4j).
+# When False or Neo4j unavailable, falls back to ChromaDB-only.
+GRAPHRAG_ENABLED = _env_bool("RPV_GRAPHRAG_ENABLED", True)
+
+# Max Cypher query results to feed the LLM
+GRAPH_TOP_K = int(os.getenv("RPV_GRAPH_TOP_K", "20"))
+
+# ── LangChain ──────────────────────────────────────────────────
+# When True, chat queries are routed through LangChain chains.
+# UML/security/doc generation still uses ollama_client.py directly.
+LANGCHAIN_ENABLED = _env_bool("RPV_LANGCHAIN_ENABLED", True)
+

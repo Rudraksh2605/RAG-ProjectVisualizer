@@ -45,9 +45,12 @@ Everything runs **100% locally** — no data leaves your machine. All LLM infere
 | 🔗 **Dependency Graph** | Visual Graphviz rendering of module and class dependencies |
 | 🛡️ **Code Quality & Security** | 10-category audit: secrets, SQL injection, memory leaks, SOLID, anti-patterns, and more |
 | 📖 **Auto Documentation** | Architecture, feature list, screen inventory, tech stack, data flow, and API docs |
-| 💬 **RAG Chat** | Conversational Q&A with context retrieved from your indexed codebase |
+| 💬 **Hybrid RAG Chat** | Conversational Q&A using **both** vector search (ChromaDB) **and** knowledge graph (Neo4j) for superior accuracy |
 | 🕒 **Project History** | Resume previously analyzed projects without re-indexing |
 | ⚙️ **Smart Model Routing** | Each task type (diagram, security, chat) is routed to the best-fit local model |
+| 🧬 **GraphRAG** | Neo4j knowledge graph captures class inheritance, method calls, and dependencies for structural queries |
+| 🌳 **AST Parsing** | Tree-sitter extracts precise code relationships (not regex approximations) for graph construction |
+| 🦜 **LangChain Orchestration** | Chat queries use LangChain chains with hybrid retrieval + LLM-generated Cypher queries |
 
 ---
 
@@ -105,7 +108,10 @@ RAG-ProjectVisualizer/
 |---|---|
 | **UI Framework** | [Streamlit](https://streamlit.io) ≥ 1.30 |
 | **LLM Backend** | [Ollama](https://ollama.com) (local inference) |
+| **RAG Orchestration** | [LangChain](https://python.langchain.com) ≥ 0.3 |
 | **Vector Database** | [ChromaDB](https://www.trychroma.com) ≥ 0.4.22 |
+| **Knowledge Graph** | [Neo4j](https://neo4j.com) ≥ 5.20 (optional, for GraphRAG) |
+| **AST Parsing** | [Tree-sitter](https://tree-sitter.github.io) (Java + Kotlin grammars) |
 | **Embedding Model** | `mxbai-embed-large` (via Ollama) |
 | **Primary Chat/Diagram Model** | `qwen2.5-coder` |
 | **Security/Analysis Model** | `deepseek-coder` |
@@ -123,6 +129,7 @@ Before you begin, make sure you have:
 - **Python 3.10+**
 - **[Ollama](https://ollama.com/download)** installed and running
 - **[Graphviz](https://graphviz.org/download/)** installed and added to your system `PATH`
+- **[Neo4j](https://neo4j.com/download/)** installed and running *(optional — for GraphRAG features)*
 - At least **8 GB of RAM** (16 GB recommended for running two models concurrently)
 - The required Ollama models pulled (see below)
 
@@ -196,6 +203,37 @@ ollama list   # Should show your pulled/created models
 
 ---
 
+## 🗄️ Setting Up Neo4j (Optional — for GraphRAG)
+
+Neo4j enables the **Knowledge Graph** features. If Neo4j is not running, the app falls back to ChromaDB-only mode automatically.
+
+### 1. Install Neo4j
+
+Download and install [Neo4j Desktop](https://neo4j.com/download/) or use Docker:
+
+```bash
+docker run -d --name neo4j \
+  -p 7474:7474 -p 7687:7687 \
+  -e NEO4J_AUTH=neo4j/password \
+  neo4j:latest
+```
+
+### 2. Configure connection (if non-default)
+
+```bash
+export RPV_NEO4J_URI=bolt://localhost:7687
+export RPV_NEO4J_USERNAME=neo4j
+export RPV_NEO4J_PASSWORD=password
+```
+
+### 3. Verify Neo4j is running
+
+Open [http://localhost:7474](http://localhost:7474) in your browser. You should see the Neo4j Browser.
+
+> **Note:** The app automatically creates all required schema constraints and indexes on first run.
+
+---
+
 ## 🚀 Running the App
 
 Make sure Ollama is running in the background, then:
@@ -260,6 +298,13 @@ export RPV_LLM_MODEL=your-model-name
 | `RPV_PARALLEL_MAX_WORKERS` | `2` | Parallel LLM workers for batch tasks |
 | `RPV_KROKI_URL` | `https://kroki.io/plantuml/png` | PlantUML rendering service |
 | `RPV_PLANTUML_SERVER` | `http://www.plantuml.com/plantuml` | Fallback PlantUML server |
+| `RPV_NEO4J_URI` | `bolt://localhost:7687` | Neo4j connection URI |
+| `RPV_NEO4J_USERNAME` | `neo4j` | Neo4j username |
+| `RPV_NEO4J_PASSWORD` | `password` | Neo4j password |
+| `RPV_NEO4J_DATABASE` | `neo4j` | Neo4j database name |
+| `RPV_GRAPHRAG_ENABLED` | `true` | Enable hybrid GraphRAG (set `false` to disable) |
+| `RPV_GRAPH_TOP_K` | `20` | Max graph query results per question |
+| `RPV_LANGCHAIN_ENABLED` | `true` | Route chat through LangChain (set `false` for native pipeline) |
 
 Set these in your shell before launching, or create a `.env` file and load it manually.
 

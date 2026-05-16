@@ -1,3 +1,4 @@
+# ── Core UI & existing deps ──
 streamlit>=1.30.0
 chromadb>=0.4.22
 requests>=2.31.0
@@ -5,3 +6,19 @@ graphviz>=0.20.1
 Pillow>=10.0.0
 markdown>=3.5
 weasyprint>=60.0
+
+# ── LangChain ecosystem ──
+langchain>=0.3.0
+langchain-community>=0.3.0
+langchain-ollama>=0.2.0
+langchain-chroma>=0.2.0
+langchain-neo4j>=0.2.0
+langchain-text-splitters>=0.3.0
+
+# ── Neo4j ──
+neo4j>=5.20.0
+
+# ── Tree-sitter (AST parsing) ──
+tree-sitter>=0.23.0
+tree-sitter-java>=0.23.0
+tree-sitter-kotlin>=0.1.0

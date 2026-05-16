@@ -70,10 +70,16 @@ if analyze_btn and project_path:
             idx_stats = rag_engine.index_project(project_path, progress=_progress)
             progress_bar.progress(1.0, text="Done!")
             st.session_state.active_project = project_path
-            st.success(
-                f"Indexed **{idx_stats['chunks']}** chunks from "
-                f"**{idx_stats['parsed']}** files."
-            )
+
+            # Build success message with optional graph stats
+            msg = (f"Indexed **{idx_stats['chunks']}** chunks from "
+                   f"**{idx_stats['parsed']}** files.")
+            graph_nodes = idx_stats.get("graph_nodes", 0)
+            graph_rels = idx_stats.get("graph_relationships", 0)
+            if graph_nodes > 0:
+                msg += (f"  \n🔗 Knowledge Graph: **{graph_nodes}** nodes, "
+                        f"**{graph_rels}** relationships.")
+            st.success(msg)
             st.rerun()         # Refresh sidebar stats
         except Exception as e:
             st.error(f"Indexing failed: {e}")
